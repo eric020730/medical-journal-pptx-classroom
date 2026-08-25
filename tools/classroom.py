@@ -725,7 +725,7 @@ def create_parser() -> argparse.ArgumentParser:
             help="Create a private run" + (" and extract its PDF" if name == "prepare" else ""),
         )
         run_parser.add_argument("pdf")
-        run_parser.add_argument("--mode", choices=("lite", "full"), default="lite")
+        run_parser.add_argument("--mode", choices=tuple(CONFIG["modes"]), default="full")
         run_parser.add_argument("--json", action="store_true")
 
     run = subparsers.add_parser("run", help="Run a bundled image-processing helper script")
@@ -735,12 +735,12 @@ def create_parser() -> argparse.ArgumentParser:
     qa = subparsers.add_parser("qa", help="Validate a completed presentation")
     qa.add_argument("pptx")
     qa.add_argument("--spec")
-    qa.add_argument("--mode", choices=("lite", "full", "smoke"), default="lite")
+    qa.add_argument("--mode", choices=(*CONFIG["modes"], "smoke"), default="full")
     qa.add_argument("--json", action="store_true")
 
     qa_spec = subparsers.add_parser("qa-spec", help="Validate a deck specification before build")
     qa_spec.add_argument("spec")
-    qa_spec.add_argument("--mode", choices=("lite", "full", "smoke"), default="lite")
+    qa_spec.add_argument("--mode", choices=(*CONFIG["modes"], "smoke"), default="full")
     qa_spec.add_argument("--json", action="store_true")
 
     image_qa = subparsers.add_parser("image-qa", help="Compare extracted images against the PDF")

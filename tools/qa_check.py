@@ -199,7 +199,7 @@ def _check_content_structure(
 
 
 def validate_specification(
-    spec_path: Path, *, mode: str = "lite", audit_images: bool = True
+    spec_path: Path, *, mode: str = "full", audit_images: bool = True
 ) -> dict[str, Any]:
     spec_path = spec_path.expanduser().resolve()
     failures: list[str] = []
@@ -429,7 +429,7 @@ def slide_has_logo(slide: Any, expected_hash: str) -> bool:
 
 
 def validate_presentation(
-    pptx_path: Path, *, spec_path: Path | None = None, mode: str = "lite"
+    pptx_path: Path, *, spec_path: Path | None = None, mode: str = "full"
 ) -> dict[str, Any]:
     failures: list[str] = []
     warnings: list[str] = []
@@ -539,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("target", type=Path, help="PowerPoint or, with --spec-only, deck JSON")
     parser.add_argument("--spec", type=Path)
     parser.add_argument("--spec-only", action="store_true", help="Validate a deck before building")
-    parser.add_argument("--mode", choices=("lite", "full", "smoke"), default="lite")
+    parser.add_argument("--mode", choices=(*CONFIG["modes"], "smoke"), default="full")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 

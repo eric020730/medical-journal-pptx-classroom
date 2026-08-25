@@ -20,8 +20,8 @@ skill。安裝後不必打開 classroom repository；在任何專案或工作資
 ### 內容模式
 
 全域整合版只接受 `--mode full`，或省略 `--mode` 以使用相同預設值。
-repository 內的 `$medical-journal-to-pptx-classroom` 仍保留 `lite` 與
-`full`，兩個 skills 互不覆寫。
+repository 內的 `$medical-journal-to-pptx-classroom` 也只接受 `full`，
+兩個 skills 互不覆寫。
 
 ## 從 GitHub release 下載
 

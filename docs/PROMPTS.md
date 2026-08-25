@@ -5,19 +5,19 @@
 ```text
 $medical-journal-to-pptx-classroom
 
-請使用 lite 模式處理 sample-papers/classroom-demo-paper.pdf。
-製作 8–12 張英文教學投影片，每張投影片都要有繁體中文講者備註。
-保留最重要的 Figure 和 Table，並清楚說明文章與數據皆為虛構示範。
+請使用 full 模式處理 sample-papers/classroom-demo-paper.pdf。
+製作 40–55 張英文教學投影片，每張投影片都要有繁體中文講者備註。
+保留所有重要 Figure 和 Table，並清楚說明文章與數據皆為虛構示範。
 完成 QA 後把 PowerPoint 儲存到 outputs。
 ```
 
-## 免費額度節省版本
+## 完整範例文章練習
 
 ```text
 $medical-journal-to-pptx-classroom
 
-使用 lite 模式產生 8 張投影片，處理我附上的 PDF。
-使用英文投影片、繁體中文講者備註及至少一張重要圖表。
+使用 full 模式產生 40–55 張投影片，處理我附上的 PDF。
+使用英文投影片、繁體中文講者備註及所有重要圖表。
 不要生成 AI 圖片；通過 QA 後輸出 PPTX。
 ```
 
@@ -50,8 +50,8 @@ $medical-journal-to-pptx-classroom
 ```text
 $medical-journal-to-pptx-classroom
 
-使用 lite 模式處理 sample-papers/my-journal.pdf，
-製作 12 張英文教學投影片與繁體中文講者備註。
+使用 full 模式處理 sample-papers/my-journal.pdf，
+製作 40–55 張英文教學投影片與繁體中文講者備註。
 ```
 
 請先將 `my-journal.pdf` 改成實際檔名。路徑包含空白或中文也可以使用。

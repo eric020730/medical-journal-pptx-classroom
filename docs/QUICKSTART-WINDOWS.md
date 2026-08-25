@@ -49,8 +49,8 @@ winget install --id oschwartz10612.Poppler --exact --source winget
 ```text
 $medical-journal-to-pptx-classroom
 
-使用 lite 模式處理 sample-papers/classroom-demo-paper.pdf，
-製作英文投影片與繁體中文講者備註，將簡報存到 outputs。
+使用 full 模式處理 sample-papers/classroom-demo-paper.pdf，
+製作 40–55 張英文投影片與繁體中文講者備註，將簡報存到 outputs。
 ```
 
 完成後開啟：

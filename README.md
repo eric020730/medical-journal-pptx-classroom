@@ -84,8 +84,8 @@ setup-windows.cmd
 ```text
 $medical-journal-to-pptx-classroom
 
-請使用 lite 模式處理 sample-papers/classroom-demo-paper.pdf，
-製作 8–16 張英文教學投影片，講者備註使用繁體中文。
+請使用 full 模式處理 sample-papers/classroom-demo-paper.pdf，
+製作 40–55 張英文教學投影片，講者備註使用繁體中文。
 清楚標示這是一篇虛構教學文章，完成 QA 後把 PPTX 儲存在 outputs。
 ```
 
@@ -104,14 +104,13 @@ $medical-journal-to-pptx-classroom
 完成所有圖片、講稿與 PowerPoint QA 後，將最終 PPTX 和可用的 PDF 儲存在 outputs。
 ```
 
-## classroom 版的兩種模式
+## classroom 版的完整教學模式
 
 | 模式 | 投影片 | 適合情境 | 使用量 |
 | --- | --- | --- | --- |
-| `lite` | 8–16 張 | 第一次上課、範例練習、有限額度 | 較低 |
 | `full` | 40–55 張 | 正式 journal club、完整住院醫師教學 | 較高 |
 
-免費方案可以嘗試 `lite`，但 **Codex 使用額度與自訂 Skills 是否開放，仍以個人帳號及官方當下政策為準**。專案不需要額外 OpenAI API key，也不依賴 AI 圖像生成。詳見 [免費方案教學指引](docs/FREE-PLAN.md)。
+所有簡報都使用 `full` 模式。**Codex 使用額度與自訂 Skills 是否開放，仍以個人帳號及官方當下政策為準**。專案不需要額外 OpenAI API key，也不依賴 AI 圖像生成。詳見 [免費方案教學指引](docs/FREE-PLAN.md)。
 
 ## 雙階段 QA 與醫學影像反相防護
 
