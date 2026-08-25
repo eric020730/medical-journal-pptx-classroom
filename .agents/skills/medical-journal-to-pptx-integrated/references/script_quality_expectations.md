@@ -35,6 +35,12 @@ invariant when modifying extraction, asset processing, deck building, or QA.
 - [x] `audit-final` validates multi-panel figure slides: labels present and
       panel geometry present (or a documented exception). Split-table width
       equality check retained.
+- [x] `recompose_panels_banded.py` automatically compares every valid column
+      count against the actual slide box, panel proportions, gutters, and
+      native-label bands. It maximizes the smallest displayed panel and keeps
+      source reading order; explicit `--cols` remains a manual override.
+- [x] Recomposed-figure sidecars preserve every recursive `source_inputs` path
+      and record the selected grid plus reproducible candidate measurements.
 
 ## Speaker-note validation
 

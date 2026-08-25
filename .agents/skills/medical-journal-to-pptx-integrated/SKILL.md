@@ -49,7 +49,10 @@ language rules, and final QA.
    intermediate crops and multi-panel recomposition.
 4. Process assets with the bundled image-processing helpers. Each paper Figure becomes
    exactly one recomposed figure slide; preserve native fixed-size A/B/C/D
-   labels and panel geometry. Protect anatomy, annotations, flowcharts, table
+   labels and panel geometry. Automatically compare horizontal and multi-row
+   arrangements against the selected slide box, panel aspect ratios, gutters,
+   and label bands; choose the arrangement that maximizes readability of the
+   smallest displayed panel. Protect anatomy, annotations, flowcharts, table
    headers, and footnotes. Raster tables retain an 8–24 px safety margin;
    preserve split-table display widths and optional EMF vector tables.
 5. Write a fresh specification with English-visible content and substantive,

@@ -83,10 +83,15 @@ class IntegratedSkillStructureTests(unittest.TestCase):
             "recompose_panels_aligned.py", "recompose_panels_banded.py", "add_panel_labels.py",
             "measure_label_gaps.py", "build_deck.py", "build_deck_standard.py",
             "build_deck_nice.py", "image_polarity.py", "deck_quality.py", "qa_gate.py",
-            "workflow.py", "run.py",
+            "workflow.py", "run.py", "test_panel_layout.py",
         }
         actual = {path.name for path in (SKILL_ROOT / "scripts").glob("*.py")}
         self.assertFalse(expected.difference(actual), msg=str(expected.difference(actual)))
+
+    def test_slide_aware_panel_layout_passes_synthetic_regressions(self) -> None:
+        result = invoke(SKILL_ROOT / "scripts" / "test_panel_layout.py")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Ran 4 tests", result.stderr)
 
     def test_skill_is_independent_of_classroom_project_configuration(self) -> None:
         for path in (SKILL_ROOT / "scripts").glob("*.py"):

@@ -127,8 +127,12 @@ When a labeled raster figure contains multiple panels:
 
 1. Separate and trim each panel without losing its meaningful content.
 2. Preserve provenance for every panel and intermediate transformation.
-3. Recompose all panels into one figure with aligned row heights and consistent
-   row widths. Fill controlled gutters with the selected slide background.
+3. Compare every reading-order-preserving row/column arrangement against the
+   selected slide-box dimensions, each panel's aspect ratio, gutter width, and
+   fixed-size label bands. Select the arrangement that maximizes the displayed
+   area of the smallest panel; use panel short-edge readability, total image
+   area, empty cells, and fewer rows as tie-breakers. Align row heights and row
+   widths, and fill controlled gutters with the selected slide background.
 4. Remove source-page panel letters where safe and provide complete panel
    geometry through `panel_boxes`, `panel_label_x_fracs`, or a geometry file.
 5. Render every A/B/C/D label outside its corresponding panel and explain each
@@ -140,13 +144,21 @@ and precise row spacing matter:
 ```bash
 python3 <skill-root>/scripts/recompose_panels_banded.py <final-figure> \
   --inputs <panel-a> <panel-b> <panel-c> <panel-d> \
-  --cols 2 --labels A,B,C,D --geometry <panel-geometry.json> \
+  --labels A,B,C,D --geometry <panel-geometry.json> \
   --gap-above-in 0.06 --gap-below-in 0.12 --label-pt 18 \
   --bg '#061428' --slide-box-w-in 12.10 --slide-box-h-in 4.85
 
 python3 <skill-root>/scripts/add_panel_labels.py <built.pptx> <labeled.pptx> \
   --spec <deck-spec.json> --geometry <panel-geometry.json> --label-pt 18
 ```
+
+Omit `--cols` for automatic layout selection. Four portrait or approximately
+square panels frequently fit better in a single left-to-right 1 × 4 row than
+in a 2 × 2 grid on a widescreen slide; wide panels may remain more legible in
+multiple rows. Do not force either arrangement universally. Add `--cols N`
+only when article semantics or an explicit user request requires that manual
+override. The sidecar records the selected arrangement and every candidate's
+measured on-screen panel sizes for reproducible review.
 
 The standard figure box is 12.10 × 4.85 inches; the nice figure box is
 12.13 × 4.95 inches. Pass the selected dimensions to the panel recomposer and

@@ -13,14 +13,15 @@ records where each label should go.
 Usage
 -----
   python recompose_panels_banded.py OUT.png \
-      --inputs A.png B.png C.png D.png --cols 2 --labels A,B,C,D \
+      --inputs A.png B.png C.png D.png --labels A,B,C,D \
       --geometry geometry.json \
       --gap-above-in 0.06 --gap-below-in 0.12 --label-pt 18
 
 Key options
 -----------
   --inputs            panel image files in reading order (pre-cropped)
-  --cols              columns in the grid (default = number of inputs => 1 row)
+  --cols              optional manual column count; by default compare every
+                      valid grid and maximize the smallest displayed panel
   --labels            comma-separated labels in reading order (e.g. A,B,C,D)
   --geometry          JSON file to write/update; keyed by OUT basename
   --gap-above-in      on-screen gap from a label's TOP to its own panel bottom
@@ -62,32 +63,106 @@ def trim(img, thr=238, frac=0.72, maxcut=0.25):
     return img.crop((l, t, r + 1, b + 1)) if r > l and b > t else img
 
 
-def layout(panels, cols, band, bg, gap):
-    """Compose grid (row-height align + equal-row-width) with a `band`-px gap
-    below every row. Returns (image, [(panel_right_px, panel_bottom_px), ...])."""
+def layout_dimensions(panels, cols, band, gap):
+    """Calculate exact row geometry without repeatedly rendering candidate grids."""
     rows = [panels[i:i + cols] for i in range(0, len(panels), cols)]
-    g = max(8, gap if gap else int(max(sum(p.width for p in r) for r in rows) * 0.018))
-    srows = []
-    for r in rows:
-        rh = min(p.height for p in r)
-        srows.append([p.resize((max(1, int(p.width * rh / p.height)), rh), Image.LANCZOS) for p in r])
-    target_w = max(sum(p.width for p in r) + g * (len(r) - 1) for r in srows)
-    frows = []
-    for r in srows:
-        cur = sum(p.width for p in r) + g * (len(r) - 1); f = target_w / cur
-        frows.append([p.resize((max(1, int(p.width * f)), max(1, int(p.height * f))), Image.LANCZOS) for p in r])
-    rowH = [max(p.height for p in r) for r in frows]
-    H = sum(rowH) + band * len(frows)
-    canvas = Image.new("RGB", (target_w, H), bg)
+    gutter = max(8, gap if gap else int(max(sum(p.width for p in row) for row in rows) * 0.018))
+    normalized_rows = []
+    for row in rows:
+        height = min(panel.height for panel in row)
+        normalized_rows.append([
+            (max(1, int(panel.width * height / panel.height)), height)
+            for panel in row
+        ])
+
+    target_width = max(
+        sum(width for width, _ in row) + gutter * (len(row) - 1)
+        for row in normalized_rows
+    )
+    final_rows = []
+    for row in normalized_rows:
+        current_width = sum(width for width, _ in row) + gutter * (len(row) - 1)
+        scale = target_width / current_width
+        final_rows.append([
+            (max(1, int(width * scale)), max(1, int(height * scale)))
+            for width, height in row
+        ])
+
+    row_heights = [max(height for _, height in row) for row in final_rows]
+    total_height = sum(row_heights) + band * len(final_rows)
+    return target_width, total_height, final_rows, row_heights, gutter
+
+
+def layout(panels, cols, band, bg, gap):
+    """Compose a grid and return right/bottom anchors in source reading order."""
+    target_width, total_height, final_rows, row_heights, gutter = layout_dimensions(
+        panels, cols, band, gap
+    )
+    canvas = Image.new("RGB", (target_width, total_height), bg)
     rects = []; y = 0
-    for ri, r in enumerate(frows):
+    panel_index = 0
+    for row_index, row in enumerate(final_rows):
         x = 0
-        for p in r:
-            canvas.paste(p, (x, y))
-            rects.append((x + p.width, y + rowH[ri]))
-            x += p.width + g
-        y += rowH[ri] + band
+        for width, height in row:
+            panel = panels[panel_index].resize((width, height), Image.LANCZOS)
+            canvas.paste(panel, (x, y))
+            rects.append((x + width, y + row_heights[row_index]))
+            x += width + gutter
+            panel_index += 1
+        y += row_heights[row_index] + band
     return canvas, rects
+
+
+def evaluate_layout(panels, cols, band_in, box_width_in, box_height_in, gap):
+    """Score a candidate using the actual slide-fit and fixed-size label bands."""
+    band = 2
+    for _ in range(12):
+        width, height, _, _, _ = layout_dimensions(panels, cols, band, gap)
+        fit = min(box_width_in / width, box_height_in / height)
+        next_band = max(2, int(round(band_in / fit)))
+        if next_band == band:
+            break
+        band = next_band
+
+    width, height, rows, _, gutter = layout_dimensions(panels, cols, band, gap)
+    fit = min(box_width_in / width, box_height_in / height)
+    displayed = [
+        (panel_width * fit, panel_height * fit)
+        for row in rows for panel_width, panel_height in row
+    ]
+    areas = [panel_width * panel_height for panel_width, panel_height in displayed]
+    short_edges = [min(panel_width, panel_height) for panel_width, panel_height in displayed]
+    empty_cells = len(rows) * cols - len(panels)
+
+    return {
+        "cols": cols,
+        "rows": len(rows),
+        "band_px": band,
+        "gutter_px": gutter,
+        "composite_width_px": width,
+        "composite_height_px": height,
+        "fit_in_per_px": fit,
+        "min_panel_area_sq_in": min(areas),
+        "min_panel_short_edge_in": min(short_edges),
+        "total_panel_area_sq_in": sum(areas),
+        "utilization_fraction": sum(areas) / (box_width_in * box_height_in),
+        "empty_cells": empty_cells,
+        "displayed_panel_sizes_in": [
+            {"width": panel_width, "height": panel_height}
+            for panel_width, panel_height in displayed
+        ],
+    }
+
+
+def layout_score(candidate):
+    """Protect the least-legible panel before comparing overall utilization."""
+    return (
+        candidate["min_panel_area_sq_in"],
+        candidate["min_panel_short_edge_in"],
+        candidate["total_panel_area_sq_in"],
+        -candidate["empty_cells"],
+        -candidate["rows"],
+    )
 
 
 def hexrgb(s):
@@ -99,7 +174,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("output")
     ap.add_argument("--inputs", nargs="+", required=True)
-    ap.add_argument("--cols", type=int, default=None)
+    ap.add_argument("--cols", type=int, default=None,
+                    help="manual column count; omit to choose the most readable grid")
     ap.add_argument("--labels", default="")
     ap.add_argument("--geometry", default="panel_geometry.json")
     ap.add_argument("--gap-above-in", type=float, default=0.06)
@@ -114,9 +190,13 @@ def main():
     ap.add_argument("--no-trim", action="store_true")
     a = ap.parse_args()
 
+    if a.cols is not None and not 1 <= a.cols <= len(a.inputs):
+        ap.error("--cols must be between 1 and the number of input panels")
+    if a.slide_box_w_in <= 0 or a.slide_box_h_in <= 0:
+        ap.error("slide-box dimensions must be positive")
+
     bg = hexrgb(a.bg)
     labels = [s for s in a.labels.split(",") if s] if a.labels else []
-    cols = a.cols or len(a.inputs)
     panels = [Image.open(p).convert("RGB") for p in a.inputs]
     if not a.no_trim:
         panels = [trim(p) for p in panels]
@@ -125,12 +205,15 @@ def main():
     band_in = a.gap_above_in + glyph_h + a.gap_below_in   # on-screen band per row
     drop_in = a.gap_above_in + a.center_offset_in         # panel bottom -> label box center
 
-    # solve band px so band_in is constant on screen for THIS figure's fit-scale
-    band = 2
-    for _ in range(5):
-        tmp, _ = layout(panels, cols, band, bg, a.gap)
-        fit = min(a.slide_box_w_in / tmp.width, a.slide_box_h_in / tmp.height)
-        band = max(2, int(round(band_in / fit)))
+    candidate_columns = [a.cols] if a.cols is not None else range(1, len(panels) + 1)
+    candidates = [
+        evaluate_layout(panels, columns, band_in,
+                        a.slide_box_w_in, a.slide_box_h_in, a.gap)
+        for columns in candidate_columns
+    ]
+    selected = max(candidates, key=layout_score)
+    cols = selected["cols"]
+    band = selected["band_px"]
     comp, rects = layout(panels, cols, band, bg, a.gap)
     comp.save(a.output)
     W, H = comp.size
@@ -151,10 +234,17 @@ def main():
     json.dump({"command": "recompose-panels-banded", "asset_type": "figure",
                "labels": labels, "native_labels": True,
                "source_inputs": [os.path.abspath(path) for path in a.inputs],
+               "layout_mode": "manual" if a.cols is not None else "auto",
+               "cols": cols, "rows": selected["rows"],
+               "slide_box_w_in": a.slide_box_w_in,
+               "slide_box_h_in": a.slide_box_h_in,
+               "layout_candidates": candidates,
                "gap_above_in": a.gap_above_in, "gap_below_in": a.gap_below_in,
                "label_pt": a.label_pt},
               open(a.output + ".postprocess.json", "w"))
-    print(f"{name}: {W}x{H}px band={band}px fit={fit:.5f} "
+    print(f"{name}: {W}x{H}px layout={selected['rows']}x{cols} "
+          f"min-panel={selected['min_panel_area_sq_in']:.2f}sq.in "
+          f"band={band}px fit={fit:.5f} "
           f"-> geometry[{name}] x{len(rects)} written to {a.geometry}")
 
 
