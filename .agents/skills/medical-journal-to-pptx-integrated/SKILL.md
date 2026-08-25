@@ -51,8 +51,10 @@ language rules, and final QA.
    exactly one recomposed figure slide. Preserve source A/B/C/D labels when
    they overlap image content; never mask or inpaint clinical pixels. Use native
    labels only when source letters are absent or isolated in a verified exterior
-   margin. Remove only confirmed thin white/gray rims, at most four pixels per
-   side by default. Automatically compare horizontal and multi-row
+   margin. Reconcile source-row seams that split verified boxed embedded labels;
+   never move a seam through a colored clinical scale. Remove only confirmed
+   thin white/gray rims from single or multipanel raster figures, at most four
+   pixels per side by default. Automatically compare horizontal and multi-row
    arrangements against the selected slide box, panel aspect ratios, gutters,
    and label bands; choose the arrangement that maximizes readability of the
    smallest displayed panel. Protect anatomy, annotations, flowcharts, table

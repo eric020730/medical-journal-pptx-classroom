@@ -16,6 +16,7 @@ from recompose_panels_banded import clean_panel_edges
 
 
 SCRIPT = Path(__file__).with_name("recompose_panels_banded.py")
+POSTPROCESS = Path(__file__).with_name("postprocess_assets.py")
 
 
 class PanelLayoutTests(unittest.TestCase):
@@ -67,6 +68,23 @@ class PanelLayoutTests(unittest.TestCase):
         subprocess.run(command, check=True, capture_output=True, text=True)
         sidecar = json.loads(Path(str(output) + ".postprocess.json").read_text())
         return output, sidecar, json.loads(geometry.read_text())
+
+    def source_panels(self, source: Image.Image, boxes: list[tuple[int, int, int, int]]) -> list[Path]:
+        source_path = self.directory / f"source_{len(list(self.directory.glob('source_*.png')))}.png"
+        source.save(source_path)
+        paths = []
+        for index, box in enumerate(boxes):
+            label = chr(ord("A") + index)
+            path = self.directory / f"{source_path.stem}_panel_{label}.png"
+            source.crop(box).save(path)
+            Path(str(path) + ".postprocess.json").write_text(json.dumps({
+                "source": str(source_path),
+                "crop_box_px": list(box),
+                "source_label_placement": "embedded",
+                "embedded_label": label,
+            }))
+            paths.append(path)
+        return paths
 
     def test_portrait_panels_use_single_horizontal_row(self) -> None:
         result = self.compose(600, 800)
@@ -150,6 +168,125 @@ class PanelLayoutTests(unittest.TestCase):
 
         self.assertEqual(edges["left"], 0)
         self.assertEqual(cleaned.tobytes(), image.tobytes())
+
+    def test_single_figure_trimmer_removes_bounded_dark_canvas_hairline(self) -> None:
+        source = self.directory / "single_figure.png"
+        output = self.directory / "single_figure_trimmed.png"
+        image = Image.new("RGB", (160, 120), (5, 5, 5))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((38, 20, 120, 97), fill=(145, 145, 145))
+        draw.line((0, 116, 79, 116), fill=(44, 44, 44))
+        draw.line((80, 116, 159, 116), fill=(56, 56, 56))
+        draw.line((0, 117, 159, 117), fill=(105, 105, 105))
+        draw.line((0, 118, 159, 118), fill=(170, 170, 170))
+        draw.line((0, 119, 159, 119), fill=(230, 230, 230))
+        image.save(source)
+
+        subprocess.run([
+            sys.executable,
+            str(POSTPROCESS),
+            "trim",
+            str(source),
+            str(output),
+            "--asset-type",
+            "figure",
+            "--bg-aware",
+            "off",
+        ], check=True, capture_output=True, text=True)
+
+        metadata = json.loads(Path(str(output) + ".postprocess.json").read_text())
+        self.assertEqual(metadata["edge_trim_px"]["bottom"], 4)
+        self.assertEqual(metadata["max_edge_px"], 4)
+        with Image.open(output) as trimmed:
+            self.assertLess(trimmed.getpixel((0, trimmed.height - 1))[0], 20)
+
+    def test_table_trimmer_keeps_its_required_margin_without_panel_rim_cleanup(self) -> None:
+        source = self.directory / "table.png"
+        output = self.directory / "table_trimmed.png"
+        image = Image.new("RGB", (160, 120), "white")
+        ImageDraw.Draw(image).rectangle((35, 30, 130, 92), outline="black", width=2)
+        image.save(source)
+
+        subprocess.run([
+            sys.executable,
+            str(POSTPROCESS),
+            "trim",
+            str(source),
+            str(output),
+            "--asset-type",
+            "table",
+        ], check=True, capture_output=True, text=True)
+
+        metadata = json.loads(Path(str(output) + ".postprocess.json").read_text())
+        self.assertEqual(metadata["margin"], 12)
+        self.assertNotIn("edge_trim_px", metadata)
+
+    def test_split_embedded_frame_moves_only_its_own_vertical_panel_pair(self) -> None:
+        source = Image.new("RGB", (360, 260), (5, 5, 5))
+        draw = ImageDraw.Draw(source)
+        draw.rectangle((18, 82, 72, 134), outline=(235, 235, 235), width=3)
+        draw.text((37, 98), "A", fill="white")
+        draw.rectangle((195, 68, 249, 118), outline=(235, 235, 235), width=3)
+        draw.text((214, 84), "B", fill="white")
+        draw.rectangle((92, 155, 150, 225), outline=(160, 160, 160), width=2)
+        inputs = self.source_panels(source, [
+            (0, 0, 180, 126),
+            (180, 0, 360, 126),
+            (0, 126, 180, 260),
+            (180, 126, 360, 260),
+        ])
+
+        _, sidecar, _ = self.compose_inputs(inputs, "--no-trim")
+
+        first, second, third, fourth = sidecar["panel_cleanup"]
+        self.assertEqual(first["boundary_adjustments"][0]["side"], "bottom")
+        self.assertEqual(third["boundary_adjustments"][0]["side"], "top")
+        self.assertGreater(first["boundary_adjustments"][0]["adjusted_boundary_px"], 134)
+        self.assertEqual(
+            first["boundary_adjustments"][0]["effective_crop_box_px"][3],
+            third["boundary_adjustments"][0]["effective_crop_box_px"][1],
+        )
+        self.assertEqual(second["boundary_adjustments"], [])
+        self.assertEqual(fourth["boundary_adjustments"], [])
+        self.assertEqual(first["label_overwritten_pixels"], 0)
+
+    def test_full_width_lower_panel_keeps_one_boundary_for_both_upper_panels(self) -> None:
+        source = Image.new("RGB", (360, 300), (5, 5, 5))
+        draw = ImageDraw.Draw(source)
+        draw.rectangle((0, 96, 49, 155), outline=(225, 225, 225), width=3)
+        draw.text((14, 113), "A", fill="white")
+        draw.rectangle((140, 94, 194, 150), outline=(225, 225, 225), width=3)
+        draw.text((158, 110), "B", fill="white")
+        draw.text((115, 178), "CBF", fill="white")
+        inputs = self.source_panels(source, [
+            (0, 0, 130, 145),
+            (130, 0, 360, 145),
+            (0, 145, 360, 300),
+        ])
+
+        _, sidecar, _ = self.compose_inputs(inputs, "--no-trim")
+
+        records = [entry["boundary_adjustments"][0] for entry in sidecar["panel_cleanup"]]
+        adjusted = {entry["adjusted_boundary_px"] for entry in records}
+        self.assertEqual(len(adjusted), 1)
+        self.assertGreater(next(iter(adjusted)), 155)
+        self.assertEqual([entry["side"] for entry in records], ["bottom", "bottom", "top"])
+
+    def test_colored_scale_crossing_seam_blocks_automatic_boundary_adjustment(self) -> None:
+        source = Image.new("RGB", (180, 250), (5, 5, 5))
+        draw = ImageDraw.Draw(source)
+        draw.rectangle((10, 77, 63, 132), outline=(235, 235, 235), width=3)
+        draw.text((27, 94), "A", fill="white")
+        draw.rectangle((140, 120, 145, 155), fill=(240, 30, 70))
+        inputs = self.source_panels(source, [
+            (0, 0, 180, 120),
+            (0, 120, 180, 250),
+        ])
+
+        _, sidecar, _ = self.compose_inputs(inputs, "--no-trim")
+
+        self.assertEqual(sidecar["panel_cleanup"][0]["boundary_adjustments"], [])
+        self.assertEqual(sidecar["panel_cleanup"][1]["boundary_adjustments"], [])
 
     def test_embedded_source_label_preserves_all_image_pixels_and_uses_no_duplicate(self) -> None:
         source = self.directory / "embedded_A.png"

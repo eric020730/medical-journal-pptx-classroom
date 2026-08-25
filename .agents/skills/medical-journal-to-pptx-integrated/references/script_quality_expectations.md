@@ -45,11 +45,19 @@ invariant when modifying extraction, asset processing, deck building, or QA.
 - [x] Exact-source panel crops containing a solid corner overwrite are rejected
       instead of silently covering anatomy, annotations, or clinical overlays.
 - [x] White, gray, and anti-aliased achromatic edge seams are trimmed by at most
-      four pixels per side by default; dark borders, colored scales, bright
-      edge-touching content, and thicker ambiguous light regions are preserved.
+      four pixels per side by default for both standalone raster figures and
+      recomposed panels; dark borders, colored scales, bright edge-touching
+      content, tables, flowcharts, and thicker ambiguous light regions are
+      preserved.
+- [x] Exact crops sharing an audited source automatically reconcile a rough row
+      boundary only when it cuts a verified boxed embedded label; independent
+      overlap groups remain separate, linked panels share one corrected seam,
+      clinical color scales block unsafe shifts, and source/effective crop boxes
+      plus bounded shift depths remain auditable.
 - [x] Recomposed-figure sidecars preserve every recursive `source_inputs` path
       and record the selected grid, reproducible candidate measurements, source
-      label policy, overwritten-pixel count, and per-side edge-trim depths.
+      label policy, overwritten-pixel count, bounded row-seam adjustments,
+      and per-side edge-trim depths.
 
 ## Speaker-note validation
 

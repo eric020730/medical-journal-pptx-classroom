@@ -268,6 +268,17 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard"):
                 rep.fail("panel_edge_trim_limit",
                          f"slide {idx} panel {panel_number} exceeds its {edge_limit}px edge limit",
                          "Remove only independently verified thin white/gray edge seams.")
+            boundary_limit = sidecar.get("max_boundary_shift_px", 24)
+            for adjustment in cleanup.get("boundary_adjustments") or []:
+                if (not isinstance(adjustment, dict)
+                        or not isinstance(adjustment.get("shift_px"), int)
+                        or adjustment["shift_px"] <= 0
+                        or not isinstance(boundary_limit, int)
+                        or adjustment["shift_px"] > boundary_limit
+                        or adjustment.get("reason") != "preserve-complete-embedded-label-frame"):
+                    rep.fail("panel_boundary_adjustment_limit",
+                             f"slide {idx} panel {panel_number} exceeds its {boundary_limit}px boundary limit",
+                             "Move a shared source seam only to preserve a verified embedded-label frame.")
         if len(labels) > 1 and not s.get("panel_geometry_exception"):
             has_geo = (len(s.get("panel_label_x_fracs") or []) >= len(labels)
                        or len(s.get("panel_boxes") or []) >= len(labels)

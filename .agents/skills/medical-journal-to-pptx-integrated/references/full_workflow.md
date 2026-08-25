@@ -108,9 +108,10 @@ python3 <skill-root>/scripts/postprocess_assets.py trim \
   <verified-table> <final-table> --asset-type table --margin 12
 ```
 
-For raster panels on a dark slide, inspect each outer edge independently for a
-thin white, gray, or anti-aliased seam. The banded recomposer removes only a
-verified achromatic seam and defaults to a hard four-pixel maximum per side;
+For single raster figures and raster panels on a dark slide, inspect each outer
+edge independently for a thin white, gray, or anti-aliased seam. The figure
+trimmer and banded recomposer remove only a verified achromatic seam and default
+to a hard four-pixel maximum per side;
 dark image background, colored perfusion scales, bright anatomy touching an
 edge, and light regions extending beyond the inspection budget are preserved.
 Never substitute a broad background-aware crop for this bounded panel cleanup.
@@ -130,6 +131,13 @@ slides.
 When a labeled raster figure contains multiple panels:
 
 1. Separate each panel without overwriting or losing meaningful image content.
+   Treat grid-derived row boundaries as provisional: when neighboring panels
+   are verified crops from the same PDF-rendered source, detect a complete boxed
+   source label crossing a shared seam and shift that seam just beyond its
+   frame. Adjust each independent overlap group separately; a full-width lower
+   panel links all upper panels to one common seam. Never shift through a
+   colored scale or overlay, never fabricate replacement pixels, and retain
+   the original/effective crop boxes in the final image sidecar.
 2. Preserve provenance for every panel and intermediate transformation.
 3. Compare every reading-order-preserving row/column arrangement against the
    selected slide-box dimensions, each panel's aspect ratio, gutter width, and
@@ -155,7 +163,7 @@ and precise row spacing matter:
 python3 <skill-root>/scripts/recompose_panels_banded.py <final-figure> \
   --inputs <panel-a> <panel-b> <panel-c> <panel-d> \
   --labels A,B,C,D --geometry <panel-geometry.json> \
-  --source-label-policy auto --max-edge-px 4 \
+  --source-label-policy auto --max-edge-px 4 --max-boundary-shift-px 24 \
   --gap-above-in 0.06 --gap-below-in 0.12 --label-pt 18 \
   --bg '#061428' --slide-box-w-in 12.10 --slide-box-h-in 4.85
 

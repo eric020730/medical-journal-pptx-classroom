@@ -41,6 +41,8 @@ Key options
   --gap               inter-panel gutter in px (default 16)
   --source-label-policy  auto, preserve, or crop-safe-margin
   --max-edge-px       maximum removable white/gray rim depth per side (default 4)
+  --max-boundary-shift-px  maximum source-row seam adjustment for a split
+                      embedded label frame (default 24)
   --no-trim           skip bounded white/gray edge cleanup of each panel
 
 Notes
@@ -157,7 +159,7 @@ def is_disposable_rim(line):
 
     if near_white >= 0.70:
         return True
-    if dominant_fraction >= 0.60 and dominant_luminance >= 40:
+    if dominant_fraction >= 0.50 and dominant_luminance >= 30:
         return True
     return float(luminance.std()) <= 32 and float(luminance.mean()) >= 70
 
@@ -193,6 +195,218 @@ def clean_panel_edges(image, max_edge_px=4):
         width - trim_px["right"],
         height - trim_px["bottom"],
     )), trim_px
+
+
+def _bright_runs(line):
+    """Yield contiguous achromatic frame strokes without requiring OpenCV."""
+    transitions = np.diff(np.r_[False, line, False].astype(np.int8))
+    starts = np.flatnonzero(transitions == 1)
+    ends = np.flatnonzero(transitions == -1)
+    return zip(starts.tolist(), ends.tolist())
+
+
+def boxed_label_bottom(source_pixels, crop_box, boundary, max_shift_px):
+    """Find a real rectangular corner label that straddles a rough row seam.
+
+    Anatomy alone is not enough: a candidate needs long parallel top/bottom
+    strokes and two vertical strokes, unless the outer stroke is genuinely
+    clipped by the source image edge. This conservative shape check prevents
+    arrows, bone edges, scale bars, and isolated letters from moving a seam.
+    """
+    x0, y0, x1, _ = crop_box
+    width = x1 - x0
+    if width < 45 or max_shift_px <= 0:
+        return None
+
+    inspect_width = min(width, max(96, min(192, int(round(width * 0.34)))))
+    regions = [(x0, x0 + inspect_width, "left")]
+    if inspect_width * 2 < width:
+        regions.append((x1 - inspect_width, x1, "right"))
+    y_start = max(y0 + 20, boundary - max_shift_px)
+    y_stop = min(source_pixels.shape[0], boundary + max_shift_px)
+    candidates = []
+
+    for rx0, rx1, corner in regions:
+        region = source_pixels[:, rx0:rx1, :].astype(np.int16)
+        bright = (
+            (region.min(axis=2) >= 115)
+            & ((region.max(axis=2) - region.min(axis=2)) <= 30)
+        )
+        min_frame_width = max(20, min(28, width // 5))
+        max_frame_width = min(160, max(min_frame_width, int(round(width * 0.55))))
+
+        for bottom in range(y_start, y_stop):
+            for start, end in _bright_runs(bright[bottom]):
+                frame_width = end - start
+                if not min_frame_width <= frame_width <= max_frame_width:
+                    continue
+                distance_to_edge = start if corner == "left" else bright.shape[1] - end
+                if distance_to_edge > min(80, max(16, int(round(width * 0.12)))):
+                    continue
+
+                top_start = max(y0, bottom - int(round(frame_width * 1.75)))
+                top_stop = bottom - max(18, int(round(frame_width * 0.58)))
+                for top in range(top_start, top_stop):
+                    horizontal = float(np.mean(bright[top, start:end]))
+                    if horizontal < 0.72:
+                        continue
+                    left_columns = bright[
+                        top:bottom,
+                        max(0, start - 4):min(bright.shape[1], start + 5),
+                    ]
+                    right_columns = bright[
+                        top:bottom,
+                        max(0, end - 5):min(bright.shape[1], end + 4),
+                    ]
+                    left_support = float(np.mean(left_columns.any(axis=1)))
+                    right_support = float(np.mean(right_columns.any(axis=1)))
+                    fully_framed = min(left_support, right_support) >= 0.52
+                    clipped_outer_stroke = (
+                        distance_to_edge <= 10
+                        and (right_support if corner == "left" else left_support) >= 0.70
+                    )
+                    if fully_framed or clipped_outer_stroke:
+                        candidates.append({
+                            "bottom": bottom,
+                            "top": top,
+                            "box_px": [rx0 + start, top, rx0 + end, bottom + 1],
+                        })
+                        break
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item["bottom"], item["box_px"][2] - item["box_px"][0]))
+
+
+def _contains_clinical_color(strip):
+    """Refuse a seam move that would discard a narrow colored scale/overlay."""
+    if strip.size == 0:
+        return False
+    values = strip.astype(np.int16)
+    colored = (
+        ((values.max(axis=2) - values.min(axis=2)) >= 45)
+        & (values.max(axis=2) >= 70)
+    )
+    min_height = min(strip.shape[0], max(2, int(np.ceil(strip.shape[0] * 0.45))))
+    columns = np.sum(colored, axis=0) >= min_height
+    return any(end - start >= 3 for start, end in _bright_runs(columns))
+
+
+def reconcile_panel_boundaries(images, metadata, max_shift_px=24):
+    """Recrop trusted neighboring panels when a seam splits an embedded label.
+
+    Panels must be exact crops of the same audited source. Adjoining crop boxes
+    form independent overlap components: a 2x2 source can adjust only A/C,
+    while a full-width lower panel links both upper panels to one shared seam.
+    No pixels are painted, erased, inpainted, or copied from another image.
+    """
+    if not 0 <= max_shift_px <= 64:
+        raise ValueError("max_boundary_shift_px must be between 0 and 64")
+    decisions = [[] for _ in images]
+    if not max_shift_px:
+        return images, decisions
+
+    sources = {}
+    groups = {}
+    boxes = {}
+    for index, (image, entry) in enumerate(zip(images, metadata)):
+        placement, _ = label_details(entry)
+        if placement not in {"embedded", "overlay", "overlap"}:
+            continue
+        source = entry.get("source")
+        box = entry.get("crop_box_px")
+        if not isinstance(source, str) or not isinstance(box, (list, tuple)) or len(box) != 4:
+            continue
+        try:
+            resolved = str(Path(source).expanduser().resolve(strict=True))
+            normalized = tuple(int(value) for value in box)
+            if resolved not in sources:
+                sources[resolved] = Image.open(resolved).convert("RGB")
+            expected = sources[resolved].crop(normalized)
+        except (OSError, TypeError, ValueError):
+            continue
+        if expected.size != image.size or expected.tobytes() != image.convert("RGB").tobytes():
+            continue
+        boxes[index] = list(normalized)
+        groups.setdefault(resolved, []).append(index)
+
+    for source, indexes in groups.items():
+        if len(indexes) < 2:
+            continue
+        pixels = np.asarray(sources[source])
+        seams = {}
+        for upper in indexes:
+            ux0, _, ux1, uy1 = boxes[upper]
+            for lower in indexes:
+                if upper == lower:
+                    continue
+                lx0, ly0, lx1, _ = boxes[lower]
+                overlap = min(ux1, lx1) - max(ux0, lx0)
+                if uy1 == ly0 and overlap >= 16:
+                    seams.setdefault(uy1, []).append((upper, lower))
+
+        for boundary, links in seams.items():
+            pending = set(range(len(links)))
+            while pending:
+                first = pending.pop()
+                component = {links[first][0], links[first][1]}
+                changed = True
+                while changed:
+                    changed = False
+                    for link_index in list(pending):
+                        upper, lower = links[link_index]
+                        if upper in component or lower in component:
+                            component.update((upper, lower))
+                            pending.remove(link_index)
+                            changed = True
+
+                upper_panels = {upper for upper, lower in links if upper in component and lower in component}
+                lower_panels = {lower for upper, lower in links if upper in component and lower in component}
+                findings = []
+                for upper in upper_panels:
+                    finding = boxed_label_bottom(pixels, boxes[upper], boundary, max_shift_px)
+                    if finding and finding["bottom"] >= boundary:
+                        findings.append((upper, finding))
+                if not findings:
+                    continue
+
+                adjusted = max(finding["bottom"] + 2 for _, finding in findings)
+                if adjusted - boundary > max_shift_px:
+                    continue
+                if any(
+                    adjusted >= boxes[lower][3]
+                    or _contains_clinical_color(
+                        pixels[boundary:adjusted, boxes[lower][0]:boxes[lower][2], :]
+                    )
+                    for lower in lower_panels
+                ):
+                    continue
+
+                frames = [finding["box_px"] for _, finding in findings]
+                for index, side in [
+                    *((upper, "bottom") for upper in upper_panels),
+                    *((lower, "top") for lower in lower_panels),
+                ]:
+                    original_box = list(boxes[index])
+                    boxes[index][3 if side == "bottom" else 1] = adjusted
+                    decisions[index].append({
+                        "axis": "y",
+                        "side": side,
+                        "original_boundary_px": boundary,
+                        "adjusted_boundary_px": adjusted,
+                        "shift_px": adjusted - boundary,
+                        "reason": "preserve-complete-embedded-label-frame",
+                        "detected_label_boxes_px": frames,
+                        "source_crop_box_px": original_box,
+                        "effective_crop_box_px": list(boxes[index]),
+                    })
+
+    repaired = list(images)
+    for index, changes in enumerate(decisions):
+        if changes:
+            source = str(Path(metadata[index]["source"]).expanduser().resolve())
+            repaired[index] = sources[source].crop(tuple(boxes[index]))
+    return repaired, decisions
 
 
 def crop_safe_label_margin(image, box):
@@ -412,6 +626,8 @@ def main():
                     default="auto", help="preserve embedded labels; crop only verified exterior margins")
     ap.add_argument("--max-edge-px", type=int, default=4,
                     help="maximum removable white/gray rim depth on each side (default: 4)")
+    ap.add_argument("--max-boundary-shift-px", type=int, default=24,
+                    help="maximum safe source-row seam adjustment for a split label frame")
     ap.add_argument("--no-trim", action="store_true")
     a = ap.parse_args()
 
@@ -421,6 +637,8 @@ def main():
         ap.error("slide-box dimensions must be positive")
     if not 0 <= a.max_edge_px <= 12:
         ap.error("--max-edge-px must be between 0 and 12")
+    if not 0 <= a.max_boundary_shift_px <= 64:
+        ap.error("--max-boundary-shift-px must be between 0 and 64")
 
     bg = hexrgb(a.bg)
     labels = [s for s in a.labels.split(",") if s] if a.labels else []
@@ -433,6 +651,12 @@ def main():
                 f"panel {path} contains a solid-color corner overwrite affecting "
                 f"{overwritten} source-image pixels; preserve embedded labels instead of masking them"
             )
+    try:
+        panels, boundary_adjustments = reconcile_panel_boundaries(
+            panels, panel_metadata, a.max_boundary_shift_px
+        )
+    except ValueError as error:
+        ap.error(str(error))
     try:
         panels, label_policy, label_margins = resolve_source_labels(
             panels, panel_metadata, a.source_label_policy
@@ -486,6 +710,7 @@ def main():
                "source_label_policy": label_policy,
                "embedded_labels": labels if not native_labels else [],
                "max_edge_px": a.max_edge_px,
+               "max_boundary_shift_px": a.max_boundary_shift_px,
                "panel_cleanup": [
                    {"source": os.path.abspath(path),
                     "label": labels[index] if index < len(labels) else "",
@@ -494,7 +719,8 @@ def main():
                     "label_action": ("preserved" if not native_labels else
                                      "cropped-exterior-margin" if label_margins[index] else
                                      "already-absent"),
-                    "label_overwritten_pixels": 0}
+                    "label_overwritten_pixels": 0,
+                    "boundary_adjustments": boundary_adjustments[index]}
                    for index, path in enumerate(a.inputs)
                ],
                "source_inputs": [os.path.abspath(path) for path in a.inputs],

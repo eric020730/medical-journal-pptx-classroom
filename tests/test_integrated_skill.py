@@ -633,6 +633,44 @@ class IntegratedImageRegressionTests(unittest.TestCase):
         )
         self.assertTrue(any("4px edge-cleanup limit" in failure for failure in report["failures"]))
 
+    def test_panel_boundary_adjustment_cannot_exceed_its_declared_pixel_limit(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": False,
+                "embedded_labels": ["A", "B"],
+                "max_boundary_shift_px": 12,
+                "panel_cleanup": [{
+                    "label_overwritten_pixels": 0,
+                    "edge_trim_px": {"left": 0},
+                    "boundary_adjustments": [{
+                        "shift_px": 13,
+                        "reason": "preserve-complete-embedded-label-frame",
+                    }],
+                }],
+            }
+        )
+        self.assertTrue(any("12px label-safe boundary" in failure for failure in report["failures"]))
+
+    def test_panel_boundary_adjustment_requires_a_verified_label_frame(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": False,
+                "embedded_labels": ["A", "B"],
+                "max_boundary_shift_px": 12,
+                "panel_cleanup": [{
+                    "label_overwritten_pixels": 0,
+                    "edge_trim_px": {"left": 0},
+                    "boundary_adjustments": [{
+                        "shift_px": 4,
+                        "reason": "arbitrary-clinical-image-crop",
+                    }],
+                }],
+            }
+        )
+        self.assertTrue(any("label-safe boundary" in failure for failure in report["failures"]))
+
     def test_pdf_decode_array_is_detected_by_the_bundled_global_skill(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             manifest, raw, rendered = create_synthetic_inversion_fixture(Path(temporary))
