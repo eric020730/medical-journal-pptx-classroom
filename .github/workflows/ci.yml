@@ -49,10 +49,8 @@ jobs:
       - name: Generate the global skill's copyright-safe demonstration article
         run: python .skill-work/ci-global-skills/medical-journal-to-pptx-integrated/scripts/run.py demo --out .skill-work/ci-workspace/synthetic-global-demo.pdf --json
 
-      - name: Verify every standard/nice and lite/full global combination
+      - name: Verify both standard and nice full-deck global styles
         run: |
-          python .skill-work/ci-global-skills/medical-journal-to-pptx-integrated/scripts/run.py smoke-test --workspace .skill-work/ci-workspace --mode lite --style standard --json
-          python .skill-work/ci-global-skills/medical-journal-to-pptx-integrated/scripts/run.py smoke-test --workspace .skill-work/ci-workspace --mode lite --style nice --json
           python .skill-work/ci-global-skills/medical-journal-to-pptx-integrated/scripts/run.py smoke-test --workspace .skill-work/ci-workspace --mode full --style standard --json
           python .skill-work/ci-global-skills/medical-journal-to-pptx-integrated/scripts/run.py smoke-test --workspace .skill-work/ci-workspace --mode full --style nice --json
 

@@ -69,9 +69,12 @@ class IntegratedSkillStructureTests(unittest.TestCase):
         content = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn(f"name: {SKILL_NAME}", content)
         self.assertLess(len(content.splitlines()), 110)
+        self.assertIn("40–55 slides", content)
+        self.assertIn("`full` is the only supported content mode", content)
+        self.assertNotIn("--mode lite", content)
         self.assertEqual(
             (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
-            "v2.0.0-global-integrated",
+            "v3.0.0-global-integrated",
         )
 
     def test_skill_preserves_all_image_building_and_quality_helpers(self) -> None:
@@ -196,7 +199,7 @@ class GlobalInstallationTests(unittest.TestCase):
             self.assertTrue(destination.is_dir())
 
 
-class VisualAndContentModeIntegrationTests(unittest.TestCase):
+class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
     def check_combination(self, mode: str, style: str, expected_slides: int) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "independent workspace"
@@ -216,17 +219,57 @@ class VisualAndContentModeIntegrationTests(unittest.TestCase):
             self.assertEqual(len(presentation.slides), expected_slides)
             self.assertTrue(all(slide.notes_slide.notes_text_frame.text for slide in presentation.slides))
 
-    def test_standard_lite_generates_verified_bilingual_deck(self) -> None:
-        self.check_combination("lite", "standard", 10)
-
     def test_standard_full_generates_verified_bilingual_deck(self) -> None:
         self.check_combination("full", "standard", 40)
 
-    def test_nice_lite_generates_verified_bilingual_deck(self) -> None:
-        self.check_combination("lite", "nice", 10)
-
     def test_nice_full_accepts_canonical_outline_references_and_part_slides(self) -> None:
         self.check_combination("full", "nice", 40)
+
+    def test_smoke_test_defaults_to_the_complete_full_deck(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = invoke(
+                SKILL_RUNNER, "smoke-test", "--workspace", Path(temporary),
+                "--style", "standard", "--json",
+                cwd=Path(temporary),
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["mode"], "full")
+            self.assertEqual(payload["slides"], 40)
+
+    def test_retired_lite_mode_is_rejected_by_every_public_entrypoint(self) -> None:
+        commands = (
+            (SKILL_RUNNER, "init-run", "missing.pdf", "--mode", "lite"),
+            (SKILL_RUNNER, "prepare", "missing.pdf", "--mode", "lite"),
+            (SKILL_RUNNER, "qa-spec", "missing.json", "--mode", "lite"),
+            (
+                SKILL_RUNNER, "qa", "missing.pptx", "--spec", "missing.json",
+                "--mode", "lite",
+            ),
+            (
+                SKILL_RUNNER, "build", "missing.json", "--out", "missing.pptx",
+                "--mode", "lite",
+            ),
+            (SKILL_RUNNER, "smoke-test", "--mode", "lite"),
+            (
+                SKILL_ROOT / "scripts" / "qa_gate.py", "spec", "missing.json",
+                "--mode", "lite",
+            ),
+            (
+                SKILL_ROOT / "scripts" / "qa_check.py", "missing.json", "--spec-only",
+                "--mode", "lite",
+            ),
+            (
+                SKILL_ROOT / "scripts" / "sonnet_gate.py", "spec", "missing.json",
+                "--content-mode", "lite",
+            ),
+        )
+        for command in commands:
+            with self.subTest(command=[str(value) for value in command]):
+                rejected = invoke(*command)
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn("invalid choice: 'lite'", rejected.stderr)
+                self.assertIn("choose from full", rejected.stderr)
 
     def check_native_panel_labels(self, style: str) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -494,14 +537,18 @@ class IntegratedImageRegressionTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-    def test_strict_lite_slide_budget_is_enforced_before_build(self) -> None:
+    def test_strict_full_slide_budget_is_enforced_before_build(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
+            specification = full_spec()
+            slides = specification["slides"]
+            assert isinstance(slides, list)
+            slides.pop(3)
             result = invoke(
-                SKILL_RUNNER, "qa-spec", write_spec(Path(temporary), full_spec()),
-                "--mode", "lite", "--json",
+                SKILL_RUNNER, "qa-spec", write_spec(Path(temporary), specification),
+                "--mode", "full", "--json",
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertTrue(any("8-16" in value for value in json.loads(result.stdout)["failures"]))
+            self.assertTrue(any("40-55" in value for value in json.loads(result.stdout)["failures"]))
 
 
 class StandaloneReleaseTests(unittest.TestCase):
@@ -606,7 +653,7 @@ class OptionalPrivateLungPaperRegression(unittest.TestCase):
             root = Path(temporary)
             result = invoke(
                 SKILL_RUNNER, "prepare", paper, "--workspace", root,
-                "--output-dir", root, "--mode", "lite", "--style", "standard", "--json",
+                "--output-dir", root, "--mode", "full", "--style", "standard", "--json",
                 cwd=root,
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr)

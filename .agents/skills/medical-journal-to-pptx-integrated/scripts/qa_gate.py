@@ -135,7 +135,7 @@ def parser() -> argparse.ArgumentParser:
     combined.add_argument("spec", type=Path)
     combined.add_argument("--pptx", type=Path, required=True)
     for stage in (prebuild, built, combined):
-        stage.add_argument("--mode", choices=("lite", "full", "smoke"), default="full")
+        stage.add_argument("--mode", choices=("full",), default="full")
         stage.add_argument("--style", choices=("standard", "nice"), default="standard")
         stage.add_argument("--json", action="store_true")
     return command

@@ -30,7 +30,6 @@ SKILL_NAME = "medical-journal-to-pptx-integrated"
 SKILL_VERSION = (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 SEMANTIC_VERSION = re.search(r"v\d+\.\d+\.\d+", SKILL_VERSION).group(0)
 MODES = {
-    "lite": {"minimum_slides": 8, "maximum_slides": 16},
     "full": {"minimum_slides": 40, "maximum_slides": 55},
 }
 STYLES = ("standard", "nice")
@@ -292,23 +291,22 @@ def render_presentation(pptx: Path) -> dict[str, Any]:
 
 
 def _synthetic_spec(asset: Path, *, mode: str, manifest: Path) -> dict[str, Any]:
-    target = 10 if mode == "lite" else 40
+    target = MODES[mode]["minimum_slides"]
     slides: list[dict[str, Any]] = [{
         "type": "title", "title": "Synthetic Medical Imaging Study",
         "authors": "Synthetic Education Team", "citation": "Fictional Journal, 2026",
         "notes": "📚 此篇為虛構教學示例，不可作為臨床證據。",
     }]
-    if mode == "full":
-        slides.append({
-            "type": "outline", "title": "Learning Outline",
-            "items": ["1️⃣ Study design — Slides 3–20", "2️⃣ Results — Slides 21–39"],
-            "notes": "🧭 本頁以繁體中文說明完整教學架構。",
-        })
+    slides.append({
+        "type": "outline", "title": "Learning Outline",
+        "items": ["1️⃣ Study design — Slides 3–20", "2️⃣ Results — Slides 21–39"],
+        "notes": "🧭 本頁以繁體中文說明完整教學架構。",
+    })
     slides.append({
         "type": "part", "number": 1, "title": "Study Design",
         "notes": "🔎 本段介紹虛構研究設計與影像判讀。",
     })
-    trailing = 3 if mode == "full" else 2
+    trailing = 3
     for index in range(target - len(slides) - trailing):
         slides.append({
             "type": "content", "title": f"Teaching Point {index + 1}",
@@ -321,12 +319,11 @@ def _synthetic_spec(asset: Path, *, mode: str, manifest: Path) -> dict[str, Any]
         "caption": "Figure 1. Fictional educational imaging example.",
         "notes": "【圖片說明 — Figure 1】🖼️ 此圖為虛構教學影像。",
     })
-    if mode == "full":
-        slides.append({
-            "type": "references", "title": "References",
-            "items": ["Synthetic Education Team. Fictional Journal, 2026."],
-            "notes": "📖 本頁列出虛構文獻，僅供流程測試。",
-        })
+    slides.append({
+        "type": "references", "title": "References",
+        "items": ["Synthetic Education Team. Fictional Journal, 2026."],
+        "notes": "📖 本頁列出虛構文獻，僅供流程測試。",
+    })
     slides.append({"type": "thanks", "title": "Thank You", "notes": "🙏 感謝聆聽虛構教學內容。"})
     return {
         "meta": {
@@ -426,7 +423,7 @@ def parser() -> argparse.ArgumentParser:
     builder.add_argument("spec", type=Path)
     builder.add_argument("--out", type=Path, required=True)
     for command in (before, completed, builder):
-        command.add_argument("--mode", choices=("lite", "full", "smoke"), default="full")
+        command.add_argument("--mode", choices=tuple(MODES), default="full")
         command.add_argument("--style", choices=STYLES, default="standard")
         command.add_argument("--json", action="store_true")
     polarity = commands.add_parser("image-qa", help="Check PDF grayscale and image provenance")
@@ -436,9 +433,9 @@ def parser() -> argparse.ArgumentParser:
     renderer = commands.add_parser("render", help="Optionally export a verified PowerPoint to PDF")
     renderer.add_argument("pptx", type=Path)
     renderer.add_argument("--json", action="store_true")
-    smoke = commands.add_parser("smoke-test", help="Run a synthetic end-to-end style/mode test")
+    smoke = commands.add_parser("smoke-test", help="Run a synthetic end-to-end full-deck style test")
     smoke.add_argument("--workspace", type=Path, default=Path.cwd())
-    smoke.add_argument("--mode", choices=tuple(MODES), default="lite")
+    smoke.add_argument("--mode", choices=tuple(MODES), default="full")
     smoke.add_argument("--style", choices=STYLES, default="standard")
     smoke.add_argument("--keep", action="store_true")
     smoke.add_argument("--json", action="store_true")

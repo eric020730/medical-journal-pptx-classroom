@@ -36,7 +36,7 @@ import re
 import sys
 from pathlib import Path
 
-MODE_LIMITS = {"lite": (8, 16), "full": (40, 55), "smoke": (1, 55)}
+MODE_LIMITS = {"full": (40, 55)}
 TABLE_MARGIN_MIN = 8
 POSTPROCESS_SUFFIX = ".postprocess.json"
 

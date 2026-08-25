@@ -1,15 +1,15 @@
 # Integrated quality gates and image provenance
 
-Run `scripts/qa_gate.py spec <spec> --mode lite|full --style standard|nice`
+Run `scripts/qa_gate.py spec <spec> --mode full --style standard|nice`
 before building and `scripts/qa_gate.py all <spec> --pptx <deck> --mode
-lite|full --style standard|nice` afterwards. Both commands combine the original
+full --style standard|nice` afterwards. Both commands combine the original
 Sonnet quality gate with the stronger integrated specification, PowerPoint,
 logo, and PDF-polarity checks. Any `[FAIL]` blocks delivery.
 
-## Content modes and visual-style normalization
+## Full-deck requirements and visual-style normalization
 
-`lite` requires 8–16 slides; `full` requires 40–55, plus outline, references,
-and section structure. Keep one canonical deck specification for both visual
+Every deck requires 40–55 slides, plus outline, references, and section
+structure. Keep one canonical deck specification for both visual
 styles. The `nice` builder maps canonical `outline` and `references` slides to
 styled content and canonical `part` slides to full-bleed section dividers only
 during rendering. Neither conversion changes the user's saved source spec.
