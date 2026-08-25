@@ -14,6 +14,12 @@ sample-papers/*
 outputs/*
 !outputs/.gitkeep
 *.pptx
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+service-account*.json
 
 # Local operating-system and editor files.
 .DS_Store

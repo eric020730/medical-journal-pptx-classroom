@@ -11,7 +11,7 @@
 推薦位置：
 
 ```text
-C:\Users\你的帳號\Documents\medical-journal-pptx-classroom\
+%USERPROFILE%\Documents\medical-journal-pptx-classroom\
 ```
 
 不要放在 `C:\Program Files`、唯讀網路磁碟，或尚未解壓縮的 ZIP 視窗內。

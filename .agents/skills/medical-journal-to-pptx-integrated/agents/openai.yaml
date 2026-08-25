@@ -1,0 +1,6 @@
+interface:
+  display_name: "Medical Journal PPTX Integrated"
+  short_description: "Portable bilingual medical journal teaching decks"
+  icon_large: "./assets/dr_leether_logo.png"
+  brand_color: "#061428"
+  default_prompt: "Use $medical-journal-to-pptx-integrated to create an English medical journal presentation with Traditional Chinese speaker notes, verified figures, and the requested style and slide count."

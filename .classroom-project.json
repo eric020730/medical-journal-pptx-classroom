@@ -1,7 +1,9 @@
 {
   "project_name": "medical-journal-pptx-classroom",
-  "classroom_version": "1.1.0",
+  "classroom_version": "2.0.0",
   "skill_name": "medical-journal-to-pptx-classroom",
+  "integrated_skill_name": "medical-journal-to-pptx-integrated",
+  "integrated_skill_version": "v2.0.0-global-integrated",
   "upstream_skill_name": "medical-journal-to-pptx",
   "upstream_version": "v0.2.38-bg-aware-trim",
   "python_minimum": "3.11",

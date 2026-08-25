@@ -5,6 +5,9 @@ repository root containing `.classroom-project.json`; never use a developer's
 username, Desktop path, Google Drive path, or an environment from another copy.
 
 - Prefer the repository skill `$medical-journal-to-pptx-classroom`.
+- The separate `$medical-journal-to-pptx-integrated` skill is self-contained;
+  install it globally with `install-global.py` when use outside this project is
+  requested. Preserve the repository classroom workflow and existing skills.
 - Use the repository `.venv` through `./journal` on macOS/Linux or
   `journal.cmd` on Windows. Run `journal doctor` before a presentation task.
 - Save final `.pptx` and optional `.pdf` files directly in `outputs/`.

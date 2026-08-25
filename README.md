@@ -2,9 +2,44 @@
 
 把一篇醫學期刊 PDF 交給 Codex，產生可編輯的 PowerPoint：**英文投影片、繁體中文講者備註、論文 Figures／Tables，以及自動品質檢查**。
 
-本專案保留 `medical-journal-to-pptx v0.2.38-bg-aware-trim` 的完整圖片處理與簡報製作流程，另外加入 macOS／Windows 安裝程式、跨裝置可攜式路徑、適合學生練習的輕量模式，以及教學版 `v1.1.0` 的進階雙階段 QA 和醫學影像反相防護。
+本專案保留 `medical-journal-to-pptx v0.2.38-bg-aware-trim` 的完整圖片處理與簡報製作流程，並提供两種互相獨立的入口：原本的 classroom repository skill，以及 `v2.0.0` **可全域安裝、可在任何專案啟用的整合版 skill**。整合版合併 standard／nice 視覺模式、lite／full 投影片模式、Sonnet 雙階段 QA，以及 PDF 灰階反相與完整影像來源追蹤。
 
 > 這不是無需 AI 帳號的離線產生器。Python 腳本負責讀取 PDF、處理圖片、組裝與驗證 PowerPoint；理解論文、撰寫英文投影片及繁體中文講稿，仍需要可使用 Codex 的帳號。
+
+## 推薦：安裝可在任何專案使用的全域整合版
+
+從 [最新 GitHub release](https://github.com/eric020730/medical-journal-pptx-classroom/releases/latest)
+下載 `medical-journal-to-pptx-integrated-v2.0.0.zip` 和 `.sha256`，驗證後完整解壓縮。
+
+macOS / Linux：
+
+```bash
+bash install-global.sh install
+```
+
+Windows PowerShell：
+
+```powershell
+.\install-global.ps1 install
+```
+
+之後開啟**任何專案**，直接使用：
+
+```text
+$medical-journal-to-pptx-integrated
+
+請用 full 模式與 nice 風格處理我提供的醫學期刊 PDF；製作 40–55 張英文
+投影片，每頁附繁體中文講稿，保留 Figures、Tables、panel labels 和完整
+PDF 灰階／來源檢查，通過兩階段 QA 後儲存到指定輸出資料夾。
+```
+
+四種組合皆受支援：`standard + lite`、`standard + full`、`nice + lite`、
+`nice + full`。升級使用 `install-global.sh upgrade` 或
+`install-global.ps1 upgrade`；解除安裝使用 `uninstall`。安裝、升級及解除
+安裝都不會刪除既有 standard、Sonnet 或 nice skills。完整說明請見
+[全域安裝、升級與解除安裝](docs/GLOBAL-INSTALL.md)。
+
+以下 classroom 操作仍保留，適合希望整個教材跟著 repository 移動的教學情境。
 
 ## 先確認你需要什麼
 
@@ -136,12 +171,18 @@ medical-journal-pptx-classroom/
 │   ├── scripts/                         完整圖片與 PowerPoint 管線
 │   ├── references/full_workflow_v0.2.38.md
 │   └── assets/                          簡報 Logo 等資源
+├── .agents/skills/medical-journal-to-pptx-integrated/
+│   ├── SKILL.md                         全域整合版簡潔入口
+│   ├── VERSION                          v2.0.0-global-integrated
+│   ├── scripts/                         雙視覺 builder、Sonnet QA、polarity
+│   └── references/                      完整流程、兩種風格、QA 來源鏈
 ├── docs/                                詳細安裝、教學與疑難排解
 ├── sample-papers/                       範例與學生自行放入的 PDF
 ├── outputs/                             最終 PPTX／PDF
 ├── tools/                               跨平台診斷、測試、QA 與發佈封裝
 ├── setup-macos.command                  macOS 一鍵安裝
 ├── setup-windows.cmd                    Windows 一鍵安裝
+├── install-global.py / .sh / .ps1       跨平台全域整合版安裝／升級／移除
 ├── journal                              macOS 指令入口
 └── journal.cmd                          Windows 指令入口
 ```
@@ -178,6 +219,7 @@ Windows：
 
 - [macOS 完整安裝](docs/QUICKSTART-MAC.md)
 - [Windows 完整安裝](docs/QUICKSTART-WINDOWS.md)
+- [可在任何專案使用的全域整合版](docs/GLOBAL-INSTALL.md)
 - [免費方案與輕量模式](docs/FREE-PLAN.md)
 - [可直接複製的提示詞](docs/PROMPTS.md)
 - [教師上課流程](docs/INSTRUCTOR-GUIDE.md)
