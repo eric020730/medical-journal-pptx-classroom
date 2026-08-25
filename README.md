@@ -2,7 +2,7 @@
 
 把一篇醫學期刊 PDF 交給 Codex，產生可編輯的 PowerPoint：**英文投影片、繁體中文講者備註、論文 Figures／Tables，以及自動品質檢查**。
 
-本專案保留 `medical-journal-to-pptx v0.2.38-bg-aware-trim` 的完整圖片處理與簡報製作流程，另外加入 macOS／Windows 安裝程式、跨裝置可攜式路徑，以及適合學生練習的輕量模式。
+本專案保留 `medical-journal-to-pptx v0.2.38-bg-aware-trim` 的完整圖片處理與簡報製作流程，另外加入 macOS／Windows 安裝程式、跨裝置可攜式路徑、適合學生練習的輕量模式，以及教學版 `v1.1.0` 的進階雙階段 QA 和醫學影像反相防護。
 
 > 這不是無需 AI 帳號的離線產生器。Python 腳本負責讀取 PDF、處理圖片、組裝與驗證 PowerPoint；理解論文、撰寫英文投影片及繁體中文講稿，仍需要可使用 Codex 的帳號。
 
@@ -78,6 +78,22 @@ $medical-journal-to-pptx-classroom
 
 免費方案可以嘗試 `lite`，但 **Codex 使用額度與自訂 Skills 是否開放，仍以個人帳號及官方當下政策為準**。專案不需要額外 OpenAI API key，也不依賴 AI 圖像生成。詳見 [免費方案教學指引](docs/FREE-PLAN.md)。
 
+## 雙階段 QA 與醫學影像反相防護
+
+部分期刊 PDF 使用特殊色彩空間或 `Decode` 設定：直接擷取內嵌 JPEG 時，CT、X 光或 MRI 可能變成黑白顛倒，但 PDF 檢視器的畫面仍然正確。`journal prepare` 會把每張原始圖與 PDF 實際渲染結果比對，記錄灰階相關性，並在 `.skill-work/<run-id>/extracted/polarity-report.json` 標記不安全來源。
+
+製作簡報時，請使用已套用 PDF 色彩解碼的 `extracted/figures/` 圖片，不要直接採用 `extracted/image_pXX_YY.*`。單張影像、裁切後的中間檔，以及由 A／B／C／D 組成的 Figure 都會追溯來源；如果發現黑白顛倒的圖進入最終素材，QA 會直接失敗。
+
+建檔前先執行內容與素材檢查，再於建檔後檢查實際 PowerPoint：
+
+```bash
+./journal image-qa .skill-work/RUN_ID/extracted/manifest.json
+./journal qa-spec .skill-work/RUN_ID/deck_spec.json --mode full
+./journal qa outputs/presentation.pptx --spec .skill-work/RUN_ID/deck_spec.json --mode full
+```
+
+Windows 使用相同參數，將 `./journal` 改成 `.\journal.cmd`。檢查範圍包含作者與引用、`full` 模式的目錄和 references、英文投影片、每頁繁中講稿、正確 Logo、16:9 畫面、一圖一頁、panel 標籤與位置、表格安全邊界，以及分割表格的像素和顯示寬度一致性。
+
 ## 系統會自動安裝什麼
 
 | 項目 | macOS | Windows | 用途 |
@@ -108,7 +124,7 @@ Windows PowerShell 或命令提示字元：
 .\journal.cmd smoke-test
 ```
 
-`smoke-test` 會實際產生虛構 PDF、執行圖片擷取與裁切、建立 PowerPoint，再檢查繁體中文講稿與 Logo，不會把測試簡報混進正式 `outputs/`。
+`smoke-test` 會實際產生虛構 PDF、執行影像反相比對與圖片裁切、通過建檔前進階 QA、建立 PowerPoint，再檢查繁體中文講稿與 Logo，不會把測試簡報混進正式 `outputs/`。
 
 ## 專案結構
 

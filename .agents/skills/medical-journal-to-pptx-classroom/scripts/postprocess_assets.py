@@ -72,7 +72,7 @@ def write_postprocess_meta(output_path: Path, command: str, source: Path | None,
         "output": str(output_path),
     }
     if source is not None:
-        meta["source"] = str(source)
+        meta["source"] = str(source.expanduser().resolve())
     meta.update(extra)
     postprocess_meta_path(output_path).write_text(
         json.dumps(meta, ensure_ascii=False, indent=2),
@@ -904,6 +904,8 @@ def recompose_panels_command(args: argparse.Namespace) -> None:
         Path(args.output), "recompose-panels",
         Path(args.composite) if args.composite else None,
         asset_type="figure",
+        source_inputs=[str(Path(path).expanduser().resolve()) for path in args.inputs]
+        if args.inputs else [],
         panels=len(cells), rows=rows, cols=cols, gap=gap, margin=margin,
         inset=args.inset, fit=args.fit, cell_w=cell_w, cell_h=cell_h,
         bg=args.bg, panel_frame=args.panel_frame,

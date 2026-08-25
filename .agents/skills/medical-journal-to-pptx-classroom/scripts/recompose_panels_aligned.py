@@ -39,6 +39,7 @@ Key options:
   --edge-white-thr / --edge-white-frac   near-white edge-trim controls
 """
 import argparse
+import json
 from PIL import Image, ImageDraw, ImageFont
 import glob
 import os
@@ -278,6 +279,20 @@ def main():
                     frame_rgb=_hex(a.panel_frame_color) if a.panel_frame_color else None,
                     bold=a.label_bold)
     out.save(a.output)
+    sidecar = Path(a.output + ".postprocess.json")
+    sidecar.write_text(
+        json.dumps(
+            {
+                "command": "recompose-panels-aligned",
+                "asset_type": "figure",
+                "labels": labels or [],
+                "source_inputs": [str(Path(path).expanduser().resolve()) for path in a.inputs],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
     print(f"wrote {a.output} {out.size} cols={cols} labels={labels} "
           f"target_in={a.label_screen_height_in} bg={a.bg}")
 

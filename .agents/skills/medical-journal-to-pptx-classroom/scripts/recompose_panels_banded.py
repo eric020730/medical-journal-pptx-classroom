@@ -150,6 +150,7 @@ def main():
     # postprocess sidecar (so the bundled build_deck.py asset gate passes)
     json.dump({"command": "recompose-panels-banded", "asset_type": "figure",
                "labels": labels, "native_labels": True,
+               "source_inputs": [os.path.abspath(path) for path in a.inputs],
                "gap_above_in": a.gap_above_in, "gap_below_in": a.gap_below_in,
                "label_pt": a.label_pt},
               open(a.output + ".postprocess.json", "w"))

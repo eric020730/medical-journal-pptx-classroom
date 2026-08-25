@@ -256,6 +256,7 @@ def initialize_run(source_pdf: Path, mode: str) -> dict[str, Any]:
         "deck_spec": str(run_directory / "deck_spec.json"),
         "output_pptx": str(output),
         "output_pdf": str(output.with_suffix(".pdf")),
+        "classroom_version": CONFIG["classroom_version"],
         "upstream_version": CONFIG["upstream_version"],
         "slide_budget": CONFIG["modes"][mode],
     }
@@ -268,6 +269,7 @@ def initialize_run(source_pdf: Path, mode: str) -> dict[str, Any]:
         "",
         f"- run_id: {run_id}",
         f"- mode: {mode}",
+        f"- classroom_version: {CONFIG['classroom_version']}",
         f"- upstream_version: {CONFIG['upstream_version']}",
         f"- source_pdf: {source_pdf}",
         f"- source_sha256: {payload['source_sha256']}",
@@ -397,7 +399,10 @@ def print_report(report: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return
-    print(f"Medical Journal PPTX Classroom | {CONFIG['upstream_version']}")
+    print(
+        f"Medical Journal PPTX Classroom v{CONFIG['classroom_version']} "
+        f"| upstream {CONFIG['upstream_version']}"
+    )
     print(f"Platform: {report['platform']}")
     print(f"Project:  {report['project_root']}")
     print()
@@ -420,6 +425,7 @@ def paths_payload() -> dict[str, Any]:
         "work": str(WORK_DIR),
         "soffice": str(binary) if (binary := find_binary("soffice")) else None,
         "pdftoppm": str(binary) if (binary := find_binary("pdftoppm")) else None,
+        "classroom_version": CONFIG["classroom_version"],
         "upstream_version": CONFIG["upstream_version"],
     }
 
@@ -559,6 +565,10 @@ def smoke_test(*, keep: bool, render: bool) -> dict[str, Any]:
         manifest = extracted / "manifest.json"
         if not manifest.is_file():
             raise RuntimeError("The PDF extractor did not produce manifest.json.")
+        run_checked(
+            [sys.executable, str(PROJECT_ROOT / "tools" / "image_polarity.py"), str(manifest)],
+            capture=True,
+        )
 
         sources = [
             *sorted((extracted / "unique").glob("*.png")),
@@ -642,6 +652,17 @@ def smoke_test(*, keep: bool, render: bool) -> dict[str, Any]:
             ],
             capture=True,
         )
+        run_checked(
+            [
+                sys.executable,
+                str(PROJECT_ROOT / "tools" / "qa_check.py"),
+                str(spec_path),
+                "--spec-only",
+                "--mode",
+                "smoke",
+            ],
+            capture=True,
+        )
 
         output = smoke_directory / "classroom-smoke-test.pptx"
         run_checked(
@@ -670,8 +691,10 @@ def smoke_test(*, keep: bool, render: bool) -> dict[str, Any]:
         result: dict[str, Any] = {
             "ok": True,
             "pdf_extraction": True,
+            "image_polarity_qa": True,
             "figure_postprocessing": True,
             "asset_audit": True,
+            "advanced_spec_qa": True,
             "pptx_generation": True,
             "speaker_notes_and_logo_qa": True,
             "slides": len(spec["slides"]),
@@ -714,6 +737,16 @@ def create_parser() -> argparse.ArgumentParser:
     qa.add_argument("--spec")
     qa.add_argument("--mode", choices=("lite", "full", "smoke"), default="lite")
     qa.add_argument("--json", action="store_true")
+
+    qa_spec = subparsers.add_parser("qa-spec", help="Validate a deck specification before build")
+    qa_spec.add_argument("spec")
+    qa_spec.add_argument("--mode", choices=("lite", "full", "smoke"), default="lite")
+    qa_spec.add_argument("--json", action="store_true")
+
+    image_qa = subparsers.add_parser("image-qa", help="Compare extracted images against the PDF")
+    image_qa.add_argument("manifest", help="Extraction manifest or extracted directory")
+    image_qa.add_argument("--spec", help="Also inspect final figure source provenance")
+    image_qa.add_argument("--json", action="store_true")
 
     render = subparsers.add_parser("render", help="Export a presentation to PDF")
     render.add_argument("pptx")
@@ -767,6 +800,17 @@ def main(argv: list[str] | None = None) -> int:
                 capture=args.json,
             )
             payload["extraction_complete"] = True
+            manifest = Path(payload["extracted_dir"]) / "manifest.json"
+            run_checked(
+                [sys.executable, str(PROJECT_ROOT / "tools" / "image_polarity.py"), str(manifest)],
+                capture=args.json,
+            )
+            report = json.loads((manifest.parent / "polarity-report.json").read_text(encoding="utf-8"))
+            payload["image_polarity_audit"] = {
+                "checked_figures": report["checked_figures"],
+                "unsafe_raw_streams": report["unsafe_raw_streams"],
+                "report": str(manifest.parent / "polarity-report.json"),
+            }
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
@@ -789,6 +833,29 @@ def main(argv: list[str] | None = None) -> int:
             "--mode",
             args.mode,
         ]
+        if args.spec:
+            command.extend(["--spec", args.spec])
+        if args.json:
+            command.append("--json")
+        run_checked(command)
+        return 0
+
+    if args.command == "qa-spec":
+        command = [
+            sys.executable,
+            str(PROJECT_ROOT / "tools" / "qa_check.py"),
+            args.spec,
+            "--spec-only",
+            "--mode",
+            args.mode,
+        ]
+        if args.json:
+            command.append("--json")
+        run_checked(command)
+        return 0
+
+    if args.command == "image-qa":
+        command = [sys.executable, str(PROJECT_ROOT / "tools" / "image_polarity.py"), args.manifest]
         if args.spec:
             command.extend(["--spec", args.spec])
         if args.json:

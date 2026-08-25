@@ -1,6 +1,6 @@
 ---
 name: "medical-journal-to-pptx-classroom"
-description: "Turn a medical journal PDF into an editable teaching PowerPoint with English slides, Traditional Chinese speaker notes, extracted figures and tables, cross-platform local tooling, and either an 8-16-slide classroom mode or the full upstream v0.2.38 40-55-slide workflow."
+description: "Turn a medical journal PDF into an editable teaching PowerPoint with English slides, Traditional Chinese speaker notes, extracted figures and tables, PDF image-inversion protection, advanced two-stage QA, cross-platform local tooling, and either an 8-16-slide classroom mode or the full upstream v0.2.38 40-55-slide workflow."
 ---
 
 # Medical Journal to PPTX: Portable Classroom Edition
@@ -32,6 +32,8 @@ journal prepare "path/to/paper.pdf" --mode full --json
 journal run extract_from_pdf "paper.pdf" --out ".skill-work/run/extracted"
 journal run postprocess_assets trim input.png output.png --asset-type figure
 journal run postprocess_assets audit-final final_assets --spec deck_spec.json
+journal image-qa extracted/manifest.json --spec deck_spec.json
+journal qa-spec deck_spec.json --mode lite
 journal run build_deck deck_spec.json --out outputs/presentation.pptx
 journal qa outputs/presentation.pptx --spec deck_spec.json --mode lite
 journal render outputs/presentation.pptx --preview
@@ -71,10 +73,15 @@ requirement to verify a generated PowerPoint.
    do not modify the source PDF. Initialize a collision-safe run with
    `journal prepare "paper.pdf" --mode lite --json` or `--mode full`.
 2. Read the extracted paper, page renders, manifest, contact sheet, and crop
-   review. Record the article title, authors, citation, heading structure,
+   review. `prepare` also compares every embedded image with its PDF-rendered
+   appearance and records unsafe inverted streams in `polarity-report.json`.
+   Record the article title, authors, citation, heading structure,
    research question, methods, important numeric findings, limitations, every
    figure/table, and conclusion. Never invent unavailable publication details.
 3. Prepare final figure/table assets using the bundled upstream scripts.
+   Use color-decoded `extracted/figures/` images or safe reviewed page renders;
+   never substitute raw `extracted/image_pXX_YY.*` streams. Preserve original
+   source paths in asset sidecars, including every recomposed panel.
    Preserve all clinically meaningful anatomy, arrows, legends, labels, axes,
    table columns, and footnotes. Flowcharts are not photographic panels; tables
    keep an 8-24 px white safety margin. Every final raster asset needs its
@@ -90,11 +97,15 @@ requirement to verify a generated PowerPoint.
    speaker notes on every slide, with accurate English medical terms and
    article-specific explanations. Use the original bundled logo and visual
    style unless the user supplies an authorized replacement.
-6. Run the upstream asset audit, build the `.pptx`, and run
-   `journal qa <pptx> --spec <deck_spec.json> --mode <lite|full>`. Fix concrete
-   failures and repeat until the QA script passes. Export a PDF and previews
-   with `journal render <pptx> --preview` when the required tools are available.
-7. Report the actual saved files, slide count, QA result, and any omitted
+6. Run the upstream asset audit and then
+   `journal qa-spec <deck_spec.json> --mode <lite|full>` BEFORE building. This
+   checks source metadata, required sections, English-only visible text, Chinese
+   notes, figure uniqueness, panel geometry, table safety, and image polarity.
+7. Build the `.pptx`, then run
+   `journal qa <pptx> --spec <deck_spec.json> --mode <lite|full>`. Fix each
+   failure and rerun both gates until they pass. Export PDF and previews with
+   `journal render <pptx> --preview` when the required tools are available.
+8. Report the actual saved files, slide count, QA result, and any omitted
    figures, tables, or optional render steps. Do not claim an output exists or
    passed checks until the corresponding command completed successfully.
 

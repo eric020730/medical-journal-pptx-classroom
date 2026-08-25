@@ -30,7 +30,8 @@ $medical-journal-to-pptx-classroom
 請包含研究背景、臨床問題、研究設計、收案條件、影像技術、主要結果、
 重要 Figures／Tables、統計意義、影像判讀重點、研究限制與臨床應用。
 投影片文字全部使用英文；每張投影片提供完整繁體中文講者備註。
-完成 asset audit、PowerPoint QA 及可用的 PDF 匯出後再交付。
+請比對原始 PDF 與擷取影像，避免 CT、X 光或 MRI 黑白反相；
+完成 image polarity audit、建檔前 qa-spec、PowerPoint QA 及可用的 PDF 匯出後再交付。
 ```
 
 ## 住院醫師教學導向
@@ -41,6 +42,7 @@ $medical-journal-to-pptx-classroom
 使用 full 模式製作住院醫師教學簡報。
 每個影像案例請說明觀察順序、典型徵象、重要鑑別診斷、常見誤判與臨床下一步。
 所有重要原文圖片維持一個 Figure 對應一張投影片；繁體中文講者備註需逐圖說明。
+若 Figure 包含 A／B／C／D 多張影像，請檢查每個 panel 的灰階方向、來源與標籤位置。
 ```
 
 ## 指定自己的 PDF

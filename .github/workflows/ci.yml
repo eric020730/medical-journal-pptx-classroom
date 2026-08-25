@@ -40,7 +40,7 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q tools tests .agents/skills/medical-journal-to-pptx-classroom/scripts
 
-      - name: Run unit tests
+      - name: Run advanced QA and image-polarity regression tests
         run: python -m unittest discover -s tests -v
 
       - name: Validate repository environment
@@ -49,7 +49,7 @@ jobs:
       - name: Generate the synthetic sample paper
         run: python tools/classroom.py demo
 
-      - name: Verify the complete PDF-to-PowerPoint pipeline
+      - name: Verify image polarity, prebuild QA, and the complete PowerPoint pipeline
         run: python tools/classroom.py smoke-test
 
       - name: Verify privacy-safe release packaging

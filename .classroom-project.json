@@ -1,6 +1,6 @@
 {
   "project_name": "medical-journal-pptx-classroom",
-  "classroom_version": "1.0.0",
+  "classroom_version": "1.1.0",
   "skill_name": "medical-journal-to-pptx-classroom",
   "upstream_skill_name": "medical-journal-to-pptx",
   "upstream_version": "v0.2.38-bg-aware-trim",
