@@ -238,14 +238,37 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard"):
                      "Recompose panels into ONE figure image before referencing it. "
                      "One figure = one slide = one image.")
 
-        if img_path.suffix.lower() == ".png" and read_sidecar(img_path) is None:
+        sidecar = read_sidecar(img_path) or {}
+        if img_path.suffix.lower() == ".png" and not sidecar:
             rep.fail("asset_sidecar", f"slide {idx} asset {name} has no {POSTPROCESS_SUFFIX} sidecar",
                      "Run the asset through postprocess_assets.py so it writes a sidecar; "
                      "build_deck.py requires it.")
 
         labels = s.get("panel_labels") or []
+        preserved = sidecar.get("source_label_policy") == "preserve"
+        if preserved and (sidecar.get("native_labels") or labels):
+            rep.fail("panel_label_duplication",
+                     f"slide {idx} preserves embedded labels and also requests native labels",
+                     "Keep source-embedded labels and omit panel_labels/native label geometry.")
+        for panel_number, cleanup in enumerate(sidecar.get("panel_cleanup") or [], 1):
+            if not isinstance(cleanup, dict):
+                rep.fail("panel_cleanup_metadata",
+                         f"slide {idx} panel {panel_number} cleanup metadata is invalid",
+                         "Regenerate its image using the bounded non-destructive panel cleaner.")
+                continue
+            overwritten = cleanup.get("label_overwritten_pixels", 0)
+            if isinstance(overwritten, (int, float)) and overwritten > 0:
+                rep.fail("panel_image_integrity",
+                         f"slide {idx} panel {panel_number} overwrites {overwritten} source-image pixels",
+                         "Preserve embedded source labels; never mask, paint, or inpaint clinical pixels.")
+            edge_limit = sidecar.get("max_edge_px", 4)
+            if any(not isinstance(value, int) or value < 0
+                   or not isinstance(edge_limit, int) or value > edge_limit
+                   for value in (cleanup.get("edge_trim_px") or {}).values()):
+                rep.fail("panel_edge_trim_limit",
+                         f"slide {idx} panel {panel_number} exceeds its {edge_limit}px edge limit",
+                         "Remove only independently verified thin white/gray edge seams.")
         if len(labels) > 1 and not s.get("panel_geometry_exception"):
-            sidecar = read_sidecar(img_path) or {}
             has_geo = (len(s.get("panel_label_x_fracs") or []) >= len(labels)
                        or len(s.get("panel_boxes") or []) >= len(labels)
                        or len(sidecar.get("panel_boxes") or []) >= len(labels)
@@ -257,7 +280,8 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard"):
                          "post-build label flow (recompose_panels_banded.py + "
                          "add_panel_labels.py) and omit panel_labels from the spec.")
 
-        lab_set = {str(l).upper() for l in labels}
+        semantic_labels = labels or sidecar.get("embedded_labels") or sidecar.get("labels") or []
+        lab_set = {str(l).upper() for l in semantic_labels}
         if lab_set:
             ghost = referenced_panel_letters(str(s.get("notes", ""))) - lab_set
             if ghost:
@@ -270,7 +294,7 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard"):
             rep.warn("figure_notes_marker", f"slide {idx} figure notes don't open with a bracket header",
                      "Open figure/table notes with the image-caption header for scannability.")
 
-        side = read_sidecar(img_path)
+        side = sidecar
         if looks_like_table(img_path, side) and side:
             if side.get("command") in {"trim", "labels"} and isinstance(side.get("margin"), int) \
                     and side["margin"] < TABLE_MARGIN_MIN:

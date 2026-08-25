@@ -48,8 +48,11 @@ language rules, and final QA.
    never raw inverted image streams. Retain provenance sidecars through
    intermediate crops and multi-panel recomposition.
 4. Process assets with the bundled image-processing helpers. Each paper Figure becomes
-   exactly one recomposed figure slide; preserve native fixed-size A/B/C/D
-   labels and panel geometry. Automatically compare horizontal and multi-row
+   exactly one recomposed figure slide. Preserve source A/B/C/D labels when
+   they overlap image content; never mask or inpaint clinical pixels. Use native
+   labels only when source letters are absent or isolated in a verified exterior
+   margin. Remove only confirmed thin white/gray rims, at most four pixels per
+   side by default. Automatically compare horizontal and multi-row
    arrangements against the selected slide box, panel aspect ratios, gutters,
    and label bands; choose the arrangement that maximizes readability of the
    smallest displayed panel. Protect anatomy, annotations, flowcharts, table
@@ -63,7 +66,8 @@ language rules, and final QA.
 6. Run `scripts/run.py qa-spec <spec.json> --mode full --style <style>` and
    fix every reported failure. Build with
    `scripts/run.py build <spec.json> --out <output.pptx> --mode full --style
-   <style>`. Add native panel labels when the run includes panel geometry.
+   <style>`. Add native panel labels only when the run includes native-label
+   geometry; preserved embedded labels must never be duplicated.
 7. Run `scripts/run.py qa <output.pptx> --spec <spec.json> --mode full
    --style <style>` and fix failures until the independent deck, presentation,
    and PDF-image gates all pass. Use `scripts/run.py render <output.pptx>` when optional
