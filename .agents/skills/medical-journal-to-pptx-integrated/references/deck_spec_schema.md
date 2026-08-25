@@ -24,7 +24,7 @@ that describes the whole deck. This document is the reference for its shape.
 | `accent_dim` | string (hex) | no | Default `#2A4566` — muted mid-blue: progress-bar background, hairline dividers |
 | `text_primary` | string (hex) | no | Default `#FFFFFF` — body copy on dark |
 | `text_secondary` | string (hex) | no | Default `#8FA8C8` — footer, citation, caption |
-| `accent_dark` / `accent_blue` / `accent_teal` / `accent_light` / `accent_pale` | string (hex) | no | Legacy keys, accepted for backward compatibility. Prefer the new keys above. |
+| `accent_dark` / `accent_blue` / `accent_teal` / `accent_light` / `accent_pale` | string (hex) | no | Compatible color aliases. Prefer the descriptive palette keys above. |
 
 ### `slides` array
 
@@ -61,7 +61,7 @@ or `notes` rather than inventing a new slide title style.
 ```json
 {
   "type": "title",
-  "title": "Diagnostic Performance of Imaging Biomarkers in Clinical Practice",
+  "title": "Clinical Evaluation of a Synthetic Research Intervention",
   "authors": "Firstauthor A, Coauthor B, Coauthor C, et al.",
   "citation": "Journal Name 2026; 12(3):123-134",
   "notes": "各位好，今天我要為大家介紹的是..."
@@ -136,7 +136,7 @@ Recommended body grammar:
     "",
     "✅ The article tests whether the proposed approach improves clinical decision-making"
   ],
-  "image": "figures/fig1.png",
+  "image": "figures/synthetic-overview.png",
   "notes": "📊 這張投影片說明本研究的臨床問題..."
 }
 ```
@@ -159,17 +159,17 @@ minimal.
 ```json
 {
   "type": "figure",
-  "title": "Results: Imaging Feature Examples",
-  "image": "figures/fig3.png",
+  "title": "Results: Representative Research Findings",
+  "image": "figures/synthetic-multipanel-example.png",
   "panel_labels": ["A", "B", "C", "D", "E", "F"],
-  "caption": "Figure 3. Representative imaging examples of the article's key findings.",
-  "notes": "【圖片說明 — Figure 3：代表性影像範例】\n\n【A 圖】..."
+  "caption": "Figure 1. Fully synthetic examples of the article's key findings.",
+  "notes": "【圖片說明 — Figure 1：完全合成的研究圖表示例】\n\n【A 圖】..."
 }
 ```
 
 `caption` is shown below the image in italic small text.
 `panel_labels` is optional for figures with no panel letters. For labeled
-multi-panel figures in v0.2.8, it is required: remove the original A/B/C/D
+multi-panel figures, it is required: remove the original A/B/C/D
 letters from the figure image crop, remove excess white margins, then use
 `panel_labels` so the builder places the labels centered under the image.
 Speaker notes must reference the same labels with `【A 圖】`, `【B 圖】`, etc.

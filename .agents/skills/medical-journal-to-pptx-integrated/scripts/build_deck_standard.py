@@ -199,7 +199,7 @@ def set_notes(slide, notes_text):
 def _draw_progress_bar(slide, pal, current_part, total_parts, y, h):
     """Draw a single bright-blue divider bar under the header.
 
-    Eric prefers this as a clean accent line, not a two-tone progress meter.
+    Render this as a clean accent line rather than a two-tone progress meter.
     Keep the signature arguments so existing slide builders do not change.
     """
     add_rect(slide, 0, y, SLIDE_W, h, pal["accent_bright"])
@@ -499,7 +499,7 @@ def build_figure(slide, data, pal, logo_path, footer_label,
                 "Provide 'panel_label_x_fracs' (one per label) or 'panel_boxes', "
                 "or set 'panel_geometry_exception': true with a documented reason. "
                 "Silently distributing labels across a single composite image is "
-                "not allowed (v0.2.11 panel-geometry gate)."
+                "not allowed by the panel-geometry quality gate."
                 % (data.get("title", ""), len(panel_labels))
             )
 
@@ -677,7 +677,7 @@ def main():
     ap.add_argument(
         "--allow-unprocessed-assets",
         action="store_true",
-        help="Bypass the v0.2.11 postprocess sidecar gate for legacy debugging only.",
+        help="Bypass the postprocess sidecar gate for isolated debugging only.",
     )
     args = ap.parse_args()
 

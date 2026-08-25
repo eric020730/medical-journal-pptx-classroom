@@ -15,7 +15,7 @@ Usage
   #    soffice --headless --convert-to pdf --outdir qa OUT.pptx
   python measure_label_gaps.py OUT.pptx qa/OUT.pdf \
       --spec deck_spec.json --geometry panel_geometry.json \
-      --figure Figure_4 --dpi 200
+      --figure FIGURE_KEY --dpi 200
 
 Requirements: python-pptx, pdftoppm (poppler), numpy, Pillow.
 """
@@ -43,7 +43,7 @@ def main():
     ap.add_argument("pdf")
     ap.add_argument("--spec", required=True)
     ap.add_argument("--geometry", required=True)
-    ap.add_argument("--figure", required=True, help="geometry key, e.g. Figure_4")
+    ap.add_argument("--figure", required=True, help="geometry key for the requested figure")
     ap.add_argument("--dpi", type=int, default=200)
     a = ap.parse_args()
 

@@ -111,10 +111,10 @@ def find_bottom_label_cut(im: Image.Image, threshold: int = 246) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# Background-aware edge refinement (v0.2.38).
+# Background-aware edge refinement.
 #
 # This is an ADDITIVE refinement layered on top of the existing white-based
-# content_bbox()/trim_image() flow — it does NOT replace it. The legacy crop
+# content_bbox()/trim_image() flow — it does NOT replace it. The baseline crop
 # runs first and stays the baseline; this step only refines the outer edges of
 # that result when the asset's real background is NOT pure white (e.g. a
 # light-grey journal page, or a black image canvas with a residual light
@@ -214,10 +214,10 @@ def background_aware_bbox(im: "Image.Image", bg_tol: int = 26, edge_std: int = 1
 
 def bg_aware_refine(im: "Image.Image", margin: int, bg_tol: int = 26,
                     force: bool = False) -> tuple["Image.Image", dict]:
-    """Additive edge refinement applied AFTER the legacy white-based crop.
+    """Additive edge refinement applied after the baseline white-based crop.
 
     In `auto` mode (force=False): if the current background is essentially pure
-    white (every channel >= 250) the legacy result is already correct and is
+    white (every channel >= 250) the baseline result is already correct and is
     returned unchanged — so pure-white decks never regress. Otherwise (grey
     page or residual hairline on a dark canvas) the edges are re-trimmed
     relative to the detected background and `margin` is re-added in that same
@@ -226,7 +226,7 @@ def bg_aware_refine(im: "Image.Image", margin: int, bg_tol: int = 26,
     box, bg = background_aware_bbox(im, bg_tol=bg_tol)
     meta = {"bg_aware_applied": False, "detected_bg": list(bg)}
     if not force and min(bg) >= 250:
-        return im, meta                       # near-pure-white: keep legacy result
+        return im, meta                       # near-pure-white: keep baseline result
     if box == (0, 0, im.width, im.height):
         return im, meta                       # nothing to refine; avoid re-padding twice
     core = im.crop(box)
@@ -262,7 +262,7 @@ def trim_image(
             if cut is not None and cut > int(cropped.height * 0.55):
                 cropped = cropped.crop((0, 0, cropped.width, cut))
 
-    # Re-trim after optional bottom-label removal (legacy white-based result).
+    # Re-trim after optional bottom-label removal (baseline white-based result).
     box2 = expand_box(content_bbox(cropped, threshold), cropped.size, margin)
     result = cropped.crop(box2)
 
@@ -1041,10 +1041,10 @@ def main() -> None:
     trim.add_argument("--cut-bottom-px", type=int, default=0)
     trim.add_argument("--bg-aware", choices=["auto", "on", "off"], default="auto",
                       help="Background-aware edge refinement layered on top of "
-                           "the legacy white-based crop. 'auto' (default): apply "
+                           "the baseline white-based crop. 'auto' (default): apply "
                            "only when the real background is not pure white "
                            "(grey page / dark canvas with a residual hairline); "
-                           "'on': always; 'off': legacy white-only behaviour.")
+                           "'on': always; 'off': baseline white-only behaviour.")
     trim.add_argument("--bg-tol", type=int, default=26,
                       help="Per-channel tolerance for matching the detected "
                            "background colour (default 26).")

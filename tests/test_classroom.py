@@ -19,7 +19,7 @@ import qa_check  # noqa: E402
 
 
 class ClassroomProjectTests(unittest.TestCase):
-    def test_project_preserves_exact_upstream_version(self) -> None:
+    def test_project_preserves_exact_classroom_skill_version(self) -> None:
         version = (classroom.SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
         self.assertEqual(version, "v0.2.38-bg-aware-trim")
         self.assertEqual(classroom.semantic_version(), "v0.2.38")
@@ -32,7 +32,7 @@ class ClassroomProjectTests(unittest.TestCase):
             (classroom.SKILL_ROOT / "references" / "full_workflow_v0.2.38.md").is_file()
         )
 
-    def test_all_upstream_executable_helpers_are_preserved(self) -> None:
+    def test_all_classroom_executable_helpers_are_preserved(self) -> None:
         for alias, filename in classroom.SCRIPT_ALIASES.items():
             with self.subTest(alias=alias):
                 self.assertTrue((classroom.SKILL_SCRIPTS / filename).is_file())

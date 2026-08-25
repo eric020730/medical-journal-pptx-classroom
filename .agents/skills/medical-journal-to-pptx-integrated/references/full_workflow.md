@@ -1,0 +1,221 @@
+# Complete Medical-Journal Teaching Workflow
+
+Convert an authorized medical-journal article into a complete, editable
+40–55-slide PowerPoint for any medical specialty. Visible slide text is
+English, every slide has substantive Traditional Chinese speaker notes, and
+each source figure occupies exactly one dedicated slide. Select `standard` or
+`nice` styling without changing the source article, content mode, or QA rules.
+
+## Workspace, privacy, and required inputs
+
+Resolve the skill root from the installed skill and the output directory from
+the user's request and applicable workspace `AGENTS.md`. Never assume a
+particular repository, user account, cloud-storage provider, specialty, source
+article, or previously generated presentation.
+
+- Read only an article the user is authorized to provide.
+- Save final `.pptx` and optional `.pdf` files directly in the requested output
+  directory; avoid overwriting an unrelated presentation.
+- Store extracted images, source manifests, deck specifications, crop review,
+  provenance sidecars, and QA reports in `.skill-work/<run-id>/`.
+- Never publish source articles, clinical information, generated decks,
+  credentials, personal paths, or intermediate working files.
+- For demonstrations and regression tests, generate entirely synthetic content.
+
+Start with:
+
+```bash
+python3 <skill-root>/scripts/run.py doctor
+python3 <skill-root>/scripts/run.py prepare <authorized-paper.pdf> \
+  --workspace <workspace> --output-dir <output-directory> \
+  --mode full --style <standard-or-nice> --json
+```
+
+On Windows, invoke the same script with `py -3`. The portable entry point
+resolves its own installed runtime or a compatible Python environment.
+
+## Analyze the article and plan the complete presentation
+
+Read the entire article, its figures, captions, tables, references, and
+supplementary information supplied by the user. Identify study design,
+population, methods, endpoints, results, uncertainty, limitations, clinical
+implications, and the article's actual heading hierarchy. Do not fabricate
+measurements, diagnoses, citations, or outcomes.
+
+Plan 40–55 slides including a title, an outline with useful slide ranges,
+section dividers, structured teaching content, source figures and tables,
+references, and a closing slide. Adapt the balance to the article type and
+evidence rather than applying a specialty-specific template. Place figures and
+tables near their first meaningful discussion. Record and explain any omitted
+source figure or table in the run manifest.
+
+Use the article's own heading and subheading wording where practical. Keep
+English slide bodies concise and organized into labeled blocks, supporting
+details, interpretation, and actionable takeaways. Speaker notes explain the
+reasoning, evidence, limitations, and interpretation in Traditional Chinese;
+introduce important English medical terms as `**Term**（中文翻譯）`.
+
+Read [slide structure](slide_structure.md), [deck schema](deck_spec_schema.md),
+or [speaker-note style](notes_style.md) only when that specific guidance is
+needed.
+
+## Extract and inspect every source asset
+
+Preparation produces extracted text, page renders, embedded image streams,
+PDF-rendered figure candidates, table crops, a source manifest, a contact
+sheet, crop-review notes, and an image-polarity audit. Review the contact sheet,
+captions, source metadata, page geometry, and crop warnings before selecting
+assets. Table renders use a high-resolution setting suitable for dense text.
+
+Embedded grayscale streams can disagree with their visual PDF appearance when
+the document applies a `Decode` array or color-space transform. Use a verified
+PDF-rendered figure, a decoded page crop, or another audited source; never put
+an inverted raw embedded stream into the presentation.
+
+For every final raster asset, preserve its neighboring
+`<asset>.postprocess.json` sidecar:
+
+- A direct transformation records its trusted `source`.
+- A composite records every `source_inputs` entry.
+- Intermediate crops keep their own sidecars so provenance can be followed
+  recursively to an audited, PDF-rendered source in the extraction manifest.
+- Vector diagrams cropped directly from the document identify the audited PDF
+  as their source.
+- A missing manifest, missing sidecar, unknown terminal source, malformed
+  source chain, or inverted ancestor is a blocking QA failure.
+
+Consult [quality gates and image provenance](quality_gates.md) when resolving
+extraction, provenance, or grayscale-polarity failures.
+
+## Crop conservatively and protect meaningful content
+
+Classify each asset as a raster figure, multipanel figure, vector diagram,
+flowchart, or table. Derive crop boundaries from the current article rather
+than assuming fixed page coordinates, dimensions, figure numbers, or layouts.
+Retain anatomy, annotations, scale bars, legends, axes, labels, connectors,
+arrows, diagram boundaries, table headers, complete rows and columns,
+footnotes, abbreviations, and source lines.
+
+Use the bundled postprocessing helpers to remove unnecessary page margins,
+detect the actual page or image background, and preserve semantic edges. The
+background-aware trimmer handles white, gray, dark, and mixed backgrounds
+without treating meaningful text or a diagram border as disposable whitespace.
+
+```bash
+python3 <skill-root>/scripts/postprocess_assets.py trim \
+  <verified-source> <final-figure> --asset-type figure
+python3 <skill-root>/scripts/postprocess_assets.py trim \
+  <verified-table> <final-table> --asset-type table --margin 12
+```
+
+A conservative two-pixel inward adjustment is acceptable for a non-flowchart
+raster panel only when visual review confirms no meaningful image content is
+lost. Never apply that adjustment to a table, flowchart, algorithm, or vector
+diagram. Record manually chosen crop boundaries in `crop_overrides.json`.
+
+For difficult layouts, read
+[article-level crop design](article_level_crop_design.md).
+
+## Preserve one figure per slide and rebuild multipanel figures
+
+Each source figure maps to exactly one figure slide and one final recomposed
+image. Panel crops are intermediate assets; never point a slide at an
+individual panel fragment or distribute one article figure across multiple
+slides.
+
+When a labeled raster figure contains multiple panels:
+
+1. Separate and trim each panel without losing its meaningful content.
+2. Preserve provenance for every panel and intermediate transformation.
+3. Recompose all panels into one figure with aligned row heights and consistent
+   row widths. Fill controlled gutters with the selected slide background.
+4. Remove source-page panel letters where safe and provide complete panel
+   geometry through `panel_boxes`, `panel_label_x_fracs`, or a geometry file.
+5. Render every A/B/C/D label outside its corresponding panel and explain each
+   visible panel individually in the Traditional Chinese speaker notes.
+
+Prefer editable, native fixed-size PowerPoint panel labels when uniform size
+and precise row spacing matter:
+
+```bash
+python3 <skill-root>/scripts/recompose_panels_banded.py <final-figure> \
+  --inputs <panel-a> <panel-b> <panel-c> <panel-d> \
+  --cols 2 --labels A,B,C,D --geometry <panel-geometry.json> \
+  --gap-above-in 0.06 --gap-below-in 0.12 --label-pt 18 \
+  --bg '#061428' --slide-box-w-in 12.10 --slide-box-h-in 4.85
+
+python3 <skill-root>/scripts/add_panel_labels.py <built.pptx> <labeled.pptx> \
+  --spec <deck-spec.json> --geometry <panel-geometry.json> --label-pt 18
+```
+
+The standard figure box is 12.10 × 4.85 inches; the nice figure box is
+12.13 × 4.95 inches. Pass the selected dimensions to the panel recomposer and
+use the same `--label-pt` value when stamping labels. Final QA checks that
+every expected label is visible in the finished presentation.
+
+## Preserve complete tables and vector assets
+
+Keep a visible safety margin on all four sides of raster tables: the default is
+12 pixels and the accepted range is 8–24 pixels. Do not deliver a table whose
+text, gridlines, heading, footnote, or outer row touches the image edge.
+
+Split a tall table only at a meaningful row boundary. Repeat its title and
+column headers on every part, preserve footnotes where relevant, normalize the
+source-canvas widths, and assign the same `image_width_in` to each part. For
+parts with a shared pixel width, calculate an on-screen width that fits the
+tallest part:
+
+```text
+image_width_in = selected_slide_box_height_in × common_pixel_width
+                 ÷ tallest_table_part_pixel_height
+```
+
+Tables are the only source item allowed to span multiple slides. Preserve EMF
+vector tables as editable, aspect-correct vector pictures on a suitable white
+presentation card. Do not rasterize an available, valid EMF merely to satisfy
+raster-sidecar rules.
+
+Detect vector figures, flowcharts, decision trees, and other diagrams from
+page drawing objects and rendered page regions, not just embedded image
+streams. Protect every meaningful frame, connector, arrow, label, and legend.
+
+## Author, validate, build, and verify
+
+Create one fresh JSON deck specification from the current article. Use
+the bundled logo or an authorized user-provided replacement, keep slide-visible
+text entirely English, and provide complete Traditional Chinese notes for every
+slide, including section dividers. Render note emphasis as real formatted
+PowerPoint runs rather than leaving literal Markdown markers.
+
+Audit the finished assets before building:
+
+```bash
+python3 <skill-root>/scripts/postprocess_assets.py audit-final \
+  <final-assets> --spec <deck-spec.json>
+python3 <skill-root>/scripts/run.py qa-spec <deck-spec.json> \
+  --mode full --style <standard-or-nice>
+python3 <skill-root>/scripts/run.py build <deck-spec.json> \
+  --out <output.pptx> --mode full --style <standard-or-nice>
+```
+
+If a figure uses native-label geometry, stamp its panel labels after building
+and run final QA on the stamped file:
+
+```bash
+python3 <skill-root>/scripts/run.py qa <final-output.pptx> \
+  --spec <deck-spec.json> --mode full --style <standard-or-nice>
+```
+
+Both independent validators must pass before delivery. They cover slide count,
+article metadata, outline and references, source heading order, English visible
+content, Traditional Chinese notes, authentic note formatting, figure uniqueness,
+recursive source provenance, grayscale polarity, multipanel geometry, native
+labels, logo placement, table margins, split-table display widths, EMF assets,
+and the final editable PowerPoint.
+
+LibreOffice and Poppler are optional. When available, export a PDF or inspect
+rendered slides; when unavailable, retain the verified `.pptx` and clearly
+identify the optional rendering step that could not run.
+
+For precise script contracts, see
+[script-level quality expectations](script_quality_expectations.md).

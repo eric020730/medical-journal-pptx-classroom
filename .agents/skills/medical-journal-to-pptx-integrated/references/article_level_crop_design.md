@@ -6,7 +6,7 @@ Produce one usable crop per article Figure/Table item, not one crop per PDF imag
 
 ## Pipeline
 
-1. Render pages and extract text/words as in v0.2.4.
+1. Render pages and extract their text and word-position metadata.
 2. Manually build the expected figure/table list from caption-like text.
 3. Use object candidates, page renders, and table crops as planning inputs.
 4. For each expected label, verify nearby candidate components against the paper.

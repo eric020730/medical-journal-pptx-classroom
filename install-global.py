@@ -172,7 +172,7 @@ def install(
         "python": str(python),
         "runtime_managed": not skip_dependencies,
         "doctor": doctor,
-        "legacy_skills_removed": [],
+        "other_skills_removed": [],
     }
 
 
@@ -194,7 +194,7 @@ def uninstall(destination: Path, *, runtime: Path, purge_runtime: bool) -> dict[
         "skill_name": SKILL_NAME,
         "removed_path": str(destination),
         "runtime_removed": removed_runtime,
-        "legacy_skills_removed": [],
+        "other_skills_removed": [],
     }
 
 

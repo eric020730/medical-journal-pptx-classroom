@@ -21,15 +21,14 @@ White medical figures pop off the dark page like clean cards.
 | `bg_page` | `#061428` | Near-black-navy full-slide background on every slide type |
 | `header_navy` | `#0F2847` | Mid-navy header band on content slides, Part-divider subtitle card, decorative bands on title/thanks |
 | `accent_bright` | `#A8C5E8` | Light-blue accent — title-slide title, Part N numeral, full progress/divider bars, horizontal stripes on title/thanks |
-| `accent_dim` | `#2A4566` | Muted mid-blue — hairline dividers and legacy accents; do not use as progress-bar background |
+| `accent_dim` | `#2A4566` | Muted mid-blue — hairline dividers and compatible accents; do not use as progress-bar background |
 | `text_primary` | `#FFFFFF` | Primary body copy on dark bg |
 | `text_secondary` | `#8FA8C8` | Footer citation, caption, page number (muted blue-gray) |
 | `text_on_header` | `#FFFFFF` | Title text sitting on the mid-navy header band |
 | `caption` | `#8FA8C8` | Figure caption (same muted blue-gray as secondary) |
 | `hairline` | `#2A4566` | Thin divider line above footer |
 
-Legacy alias keys accepted by `meta` (for backward compatibility only —
-prefer the new names above):
+Compatible alias keys accepted by `meta` (prefer the descriptive keys above):
 - `accent_dark` / `bg_dark` → `bg_page`
 - `accent_blue` / `accent_light` → `accent_bright`
 - `accent_teal` / `accent_pale` → `accent_dim`
@@ -183,7 +182,7 @@ Right (11pt, right-aligned):   <slide_num>  — zero-padded 2-digit, no slash, n
 
 Examples for the footer label:
 - `Firstauthor et al — Journal Name 2026  |  Imaging Biomarkers in Clinical Practice`
-- `Groupname et al — Journal Name 2025  |  AI Model Monitoring in Radiology`
+- `Groupname et al — Journal Name 2025  |  Clinical Research Quality Monitoring`
 
 Use an em dash (`—`) between author and journal, two spaces + pipe + two
 spaces before the topic. The topic should be short — roughly 4-8 words.

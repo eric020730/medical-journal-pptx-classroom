@@ -1,6 +1,6 @@
 # 全域整合版 Skill：安裝、升級與解除安裝
 
-`medical-journal-to-pptx-integrated v3.0.0` 是真正獨立的全域 Codex
+`medical-journal-to-pptx-integrated v4.0.0` 是真正獨立的全域 Codex
 skill。安裝後不必打開 classroom repository；在任何專案或工作資料夾都可以
 使用 `$medical-journal-to-pptx-integrated`。
 
@@ -10,45 +10,44 @@ skill。安裝後不必打開 classroom repository；在任何專案或工作資
 
 | 內容 | 投影片 | 視覺 | 特徵 |
 | --- | --- | --- | --- |
-| `full` | 40–55 張 | `standard` | 完整 journal-club 與原版視覺 |
+| `full` | 40–55 張 | `standard` | 完整 journal-club 與標準視覺 |
 | `full` | 40–55 張 | `nice` | 完整 journal-club 與 nice 視覺 |
 
-兩種風格都保留 v0.2.38 圖片處理、英文投影片、繁體中文講稿、單一 Figure
+兩種風格都支援完整圖片處理、英文投影片、繁體中文講稿、單一 Figure
 對應單一頁、native A/B/C/D panel labels、EMF vector tables、表格安全邊界、
-Sonnet 建檔前／後 QA、PDF 灰階反相比對與完整影像來源鏈。
+建檔前／後雙階段 QA、PDF 灰階反相比對與完整影像來源鏈。
 
-### 從 v2 升級時的模式變更
+### 內容模式
 
-`v3.0.0` 移除全域整合版的 `lite` 模式；既有指令若包含 `--mode lite`，
-請改為 `--mode full`，或省略 `--mode` 以使用預設的完整教學模式。
-此變更只影響 `$medical-journal-to-pptx-integrated`；repository 內的
-`$medical-journal-to-pptx-classroom` 仍保留 `lite` 與 `full`。
+全域整合版只接受 `--mode full`，或省略 `--mode` 以使用相同預設值。
+repository 內的 `$medical-journal-to-pptx-classroom` 仍保留 `lite` 與
+`full`，兩個 skills 互不覆寫。
 
 ## 從 GitHub release 下載
 
 1. 開啟 [GitHub Releases](https://github.com/eric020730/medical-journal-pptx-classroom/releases/latest)。
-2. 下載 `medical-journal-to-pptx-integrated-v3.0.0.zip` 及同名 `.sha256`。
+2. 下載 `medical-journal-to-pptx-integrated-v4.0.0.zip` 及同名 `.sha256`。
 3. 驗證 SHA-256，然後完整解壓縮。不要只複製單一 `SKILL.md`；scripts、
    references、logo 與 requirements 都是 skill 必要部分。
 
 macOS / Linux：
 
 ```bash
-shasum -a 256 -c medical-journal-to-pptx-integrated-v3.0.0.zip.sha256
-unzip medical-journal-to-pptx-integrated-v3.0.0.zip
-cd medical-journal-to-pptx-integrated-v3.0.0
+shasum -a 256 -c medical-journal-to-pptx-integrated-v4.0.0.zip.sha256
+unzip medical-journal-to-pptx-integrated-v4.0.0.zip
+cd medical-journal-to-pptx-integrated-v4.0.0
 bash install-global.sh install
 ```
 
 Windows PowerShell：
 
 ```powershell
-$archive = "medical-journal-to-pptx-integrated-v3.0.0.zip"
+$archive = "medical-journal-to-pptx-integrated-v4.0.0.zip"
 $expected = ((Get-Content "$archive.sha256") -split "\s+")[0]
 $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "SHA-256 mismatch" }
 Expand-Archive $archive -DestinationPath .
-Set-Location .\medical-journal-to-pptx-integrated-v3.0.0
+Set-Location .\medical-journal-to-pptx-integrated-v4.0.0
 .\install-global.ps1 install
 ```
 
@@ -130,8 +129,8 @@ Windows：
 ```
 
 需要一併移除獨立 Python runtime 時，加上 `--purge-runtime`。解除安裝只會
-移除 `medical-journal-to-pptx-integrated`，不會刪除舊的 standard、Sonnet
-或 nice skills。升級失敗會自動回復原本的整合版。
+移除 `medical-journal-to-pptx-integrated`，不會刪除任何其他 skill。
+升級失敗會自動回復原本的整合版。
 
 進階使用者可直接執行跨平台 Python 安裝程式：
 

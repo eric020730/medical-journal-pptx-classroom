@@ -29,4 +29,4 @@ AI 生成的研究摘要、統計解釋、臨床建議與投影片內容，都�
 
 ## Logo 與品牌
 
-原始 `v0.2.38` 技能內含 Dr. Leether Logo。公开發布前請確認你擁有重新散布該 Logo 的權利，否則應以經授權的課程 Logo 替代。
+本 repository 內含 Dr. Leether Logo。公開發布前請確認你擁有重新散布該 Logo 的權利，否則應以經授權的課程 Logo 替代。

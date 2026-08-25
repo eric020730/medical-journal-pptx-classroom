@@ -22,7 +22,7 @@ Why both page renders and embedded images?
   crop the page region that contains the table.
 - Embedded raster images (via /XObject) give the cleanest grab when available.
 
-The figure/table logic is shared with Eric's personal medical wiki ingestion:
+The figure/table logic supports general medical-journal extraction:
 - likely figures are copied from embedded raster images, filtering tiny
   icons/logos;
 - tables are located with pdfplumber.find_tables();
@@ -154,7 +154,7 @@ def extract(pdf_path: str, out_dir: str, dpi: int = 200, dedup_threshold: int = 
             "text_chars": len(page_text),
         })
 
-        # Embedded images. Preserve the legacy root-level image files, but also
+        # Embedded images. Preserve the existing root-level image files and also
         # create a filtered figures/ set that skips likely icons/logos.
         for idx, img in enumerate(page.get_images(full=True), start=1):
             xref = img[0]
@@ -202,8 +202,8 @@ def extract(pdf_path: str, out_dir: str, dpi: int = 200, dedup_threshold: int = 
             figure_method = "embedded_image_filtered"
 
             # Directly extracted PDF image streams may omit page-level Decode
-            # or colorspace transforms. This is common in radiology PDFs and
-            # can turn CT panels into inverted negatives. When the image
+            # or colorspace transforms. This can invert grayscale illustrations
+            # from any medical specialty. When the image
             # placement bbox is available, render that page region instead;
             # PyMuPDF applies the same transforms a PDF viewer would.
             if bbox:

@@ -2,9 +2,9 @@
 
 Run `scripts/qa_gate.py spec <spec> --mode full --style standard|nice`
 before building and `scripts/qa_gate.py all <spec> --pptx <deck> --mode
-full --style standard|nice` afterwards. Both commands combine the original
-Sonnet quality gate with the stronger integrated specification, PowerPoint,
-logo, and PDF-polarity checks. Any `[FAIL]` blocks delivery.
+full --style standard|nice` afterwards. Both commands combine independent
+teaching-deck, specification, PowerPoint, logo, and PDF-polarity checks.
+Any `[FAIL]` blocks delivery.
 
 ## Full-deck requirements and visual-style normalization
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a small, clearly fictional medical-imaging article for class practice."""
+"""Generate a small, clearly fictional medical-journal article for testing."""
 
 from __future__ import annotations
 
@@ -38,12 +38,12 @@ def synthetic_workflow_image() -> bytes:
     title_font = drawing_font(34, bold=True)
     heading_font = drawing_font(25, bold=True)
     body_font = drawing_font(21)
-    draw.text((48, 35), "SYNTHETIC IMAGING WORKFLOW — FICTIONAL DATA", fill="#102444", font=title_font)
+    draw.text((48, 35), "SYNTHETIC RESEARCH WORKFLOW — FICTIONAL DATA", fill="#102444", font=title_font)
 
     boxes = [
-        ((48, 155, 378, 495), "Image acquisition", ["120 synthetic cases", "Three image readers", "No patient data"]),
-        ((470, 155, 800, 495), "Structured review", ["Standardized checklist", "Reader calibration", "Fictional reference"]),
-        ((892, 155, 1222, 495), "Teaching outcome", ["Sensitivity: 88%", "Specificity: 82%", "Illustrative only"]),
+        ((48, 155, 378, 495), "Dataset assembly", ["120 synthetic records", "Three assessors", "No patient data"]),
+        ((470, 155, 800, 495), "Structured review", ["Predefined checklist", "Assessor calibration", "Fictional reference"]),
+        ((892, 155, 1222, 495), "Teaching outcome", ["Primary measure: 88%", "Secondary measure: 82%", "Illustrative only"]),
     ]
     for rectangle, heading, lines in boxes:
         draw.rounded_rectangle(rectangle, radius=26, fill="white", outline="#b3c4d9", width=4)
@@ -71,12 +71,12 @@ def add_header(page: fitz.Page, number: int) -> None:
     page.draw_rect(fitz.Rect(0, 0, PAGE_WIDTH, 57), color=NAVY, fill=NAVY)
     page.insert_text(
         (42, 35),
-        "SYNTHETIC CLASSROOM JOURNAL | NOT A REAL STUDY",
+        "SYNTHETIC MEDICAL JOURNAL | NOT A REAL STUDY",
         fontsize=12,
         color=(1, 1, 1),
         fontname="hebo",
     )
-    page.insert_text((42, 810), f"Classroom demonstration / Page {number}", fontsize=9, color=GREY)
+    page.insert_text((42, 810), f"Synthetic demonstration / Page {number}", fontsize=9, color=GREY)
     page.insert_text((360, 810), "Fictional results - educational use only", fontsize=8, color=GREY)
 
 
@@ -110,10 +110,10 @@ def draw_table(page: fitz.Page, top: float) -> float:
     x_positions = [46, 220, 338, 450, 549]
     rows = [
         ("Synthetic measure", "Workflow A", "Workflow B", "Difference"),
-        ("Sensitivity", "88%", "76%", "+12 points"),
-        ("Specificity", "82%", "79%", "+3 points"),
+        ("Primary measure", "88%", "76%", "+12 points"),
+        ("Secondary measure", "82%", "79%", "+3 points"),
         ("Median review time", "4.2 min", "5.1 min", "-0.9 min"),
-        ("Reader agreement", "0.74", "0.61", "+0.13"),
+        ("Assessor agreement", "0.74", "0.61", "+0.13"),
     ]
     row_height = 33
     for index, row in enumerate(rows):
@@ -140,10 +140,10 @@ def create_demo_paper(destination: Path) -> Path:
     page = document.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
     add_header(page, 1)
     y = 94
-    y = add_heading(page, "Synthetic Evaluation of a Structured Imaging Workflow", y)
+    y = add_heading(page, "Synthetic Evaluation of a Structured Research Workflow", y)
     y = add_paragraph(
         page,
-        "Classroom Education Team | Synthetic Journal of Imaging Education | 2026. "
+        "Synthetic Education Team | Synthetic Journal of Medical Education | 2026. "
         "This article and all results were created solely to test educational software.",
         y,
         height=47,
@@ -151,8 +151,8 @@ def create_demo_paper(destination: Path) -> Path:
     y = add_heading(page, "Abstract", y)
     y = add_paragraph(
         page,
-        "Purpose: demonstrate how an imaging journal can be converted into a teaching presentation. "
-        "Methods: 120 fictional examinations were reviewed with two imaginary workflows. "
+        "Purpose: demonstrate how a medical journal can be converted into a teaching presentation. "
+        "Methods: 120 fictional records were reviewed with two imaginary workflows. "
         "Results: all numerical values are invented. Conclusion: this file is useful for software "
         "validation and must never be interpreted as evidence for medical decisions.",
         y,
@@ -161,7 +161,7 @@ def create_demo_paper(destination: Path) -> Path:
     y = add_heading(page, "Introduction", y)
     y = add_paragraph(
         page,
-        "A reusable classroom example must avoid copyrighted articles and identifiable patient data. "
+        "A reusable educational example must avoid copyrighted articles and identifiable patient data. "
         "This synthetic document includes searchable text, a raster workflow figure, and a vector table "
         "so students can verify extraction, image post-processing, and PowerPoint creation.",
         y,
@@ -170,20 +170,20 @@ def create_demo_paper(destination: Path) -> Path:
     y = add_heading(page, "Methods", y)
     y = add_paragraph(
         page,
-        "The simulated cohort contains 120 invented cases. Three fictional readers apply a structured "
+        "The simulated dataset contains 120 invented records. Three fictional assessors apply a structured "
         "checklist. The reference standard, outcomes, and all confidence estimates are fabricated. "
-        "No human participants, protected health information, or real imaging datasets are included.",
+        "No human participants, protected health information, or real clinical datasets are included.",
         y,
         height=72,
     )
-    page.insert_text((46, y + 8), "Study design: synthetic classroom simulation", fontsize=10, color=BLUE, fontname="hebo")
+    page.insert_text((46, y + 8), "Study design: synthetic research simulation", fontsize=10, color=BLUE, fontname="hebo")
 
     page = document.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
     add_header(page, 2)
     y = add_heading(page, "Results", 97)
     y = add_paragraph(
         page,
-        "The diagram illustrates the imaginary transition from image acquisition to structured review "
+        "The diagram illustrates the imaginary transition from dataset assembly to structured review "
         "and a fictional teaching outcome. All percentages are placeholders for pipeline validation.",
         y,
         height=48,
@@ -193,12 +193,12 @@ def create_demo_paper(destination: Path) -> Path:
     y = image_rectangle.y1 + 18
     y = add_paragraph(
         page,
-        "Figure 1. Synthetic image-review workflow with fictional sensitivity and specificity. "
-        "This figure is generated for the classroom and contains no patient images.",
+        "Figure 1. Synthetic research-review workflow with fictional performance measures. "
+        "This figure is generated for testing and contains no patient information.",
         y,
         height=52,
     )
-    y = add_heading(page, "Imaging Interpretation", y)
+    y = add_heading(page, "Interpretation", y)
     add_paragraph(
         page,
         "Students should explain the workflow rather than treat its performance values as scientific "
@@ -247,10 +247,10 @@ def create_demo_paper(destination: Path) -> Path:
 
     document.set_metadata(
         {
-            "title": "Synthetic Evaluation of a Structured Imaging Workflow",
-            "author": "Classroom Education Team",
+            "title": "Synthetic Evaluation of a Structured Research Workflow",
+            "author": "Synthetic Education Team",
             "subject": "Fictional article for software testing; not clinical evidence",
-            "keywords": "synthetic, classroom, fictional, no patient data",
+            "keywords": "synthetic, medical education, fictional, no patient data",
         }
     )
     document.save(destination, garbage=4, deflate=True)
@@ -263,7 +263,7 @@ def main() -> int:
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
     output = create_demo_paper(args.output.expanduser().resolve())
-    print(f"Created synthetic classroom paper: {output}")
+    print(f"Created synthetic demonstration paper: {output}")
     return 0
 
 

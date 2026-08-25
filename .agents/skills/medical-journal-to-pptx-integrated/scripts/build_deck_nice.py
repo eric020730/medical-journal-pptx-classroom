@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""medical-journal-to-pptx-nice builder — dark-academic teaching deck (16:9).
+"""Render the enhanced dark-academic teaching-deck style in widescreen 16:9.
 
 Visual style ("nice"): near-black-navy page background (#061428), a 1.0" mid-navy
 header band (#102444) with a kicker line above the title, a bright light-blue

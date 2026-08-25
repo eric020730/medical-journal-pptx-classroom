@@ -162,7 +162,7 @@ Pattern for cited studies: author+year header → cohort size → key definition
 ## Example 8 — Figure slide with labeled sub-images
 
 ```
-【圖片說明 — Figure 3：代表性影像或圖表範例】
+【圖片說明 — Figure N：代表性研究影像或圖表範例】
 
 此圖位於文章的相關章節，展示本文最重要的影像、圖表或模型輸出。
 
@@ -205,8 +205,8 @@ bracket notation 【X: Name（中文）】 for consistency.
 ```
 📋 對不同對象的建議：
 
-👨‍⚕️ 對放射科醫師：
-✅ 報告中清楚描述本文定義的關鍵影像特徵
+👨‍⚕️ 對臨床專業人員：
+✅ 報告中清楚描述本文定義的關鍵研究發現
 ✅ 說明不確定性與建議下一步
 
 💻 對 AI 開發者：

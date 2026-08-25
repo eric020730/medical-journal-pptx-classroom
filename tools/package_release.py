@@ -181,13 +181,12 @@ def _zip_info(archive_name: str, source: Path) -> zipfile.ZipInfo:
 
 def create_release(destination: Path | None = None) -> dict[str, Any]:
     version = CONFIG["classroom_version"]
-    upstream = CONFIG["upstream_version"].split("-", 1)[0]
     archive_root = CONFIG["project_name"]
     if destination is None:
         destination = (
             PROJECT_ROOT
             / "dist"
-            / f"{archive_root}-v{version}-upstream-{upstream}.zip"
+            / f"{archive_root}-v{version}.zip"
         )
     elif not destination.is_absolute():
         destination = (PROJECT_ROOT / destination).resolve()
@@ -202,7 +201,6 @@ def create_release(destination: Path | None = None) -> dict[str, Any]:
     manifest_lines = [
         "Medical Journal PPTX Classroom release manifest",
         f"Classroom version: v{version}",
-        f"Upstream skill: {CONFIG['upstream_version']}",
         "",
         "SHA256  PATH",
     ]
@@ -294,7 +292,6 @@ def create_skill_release(destination: Path | None = None) -> dict[str, Any]:
     manifest_lines = [
         "Medical Journal PPTX Integrated global skill release manifest",
         f"Integrated skill version: {CONFIG['integrated_skill_version']}",
-        f"Image pipeline upstream: {CONFIG['upstream_version']}",
         "", "SHA256  PATH",
     ]
     with zipfile.ZipFile(destination, "w", allowZip64=True) as archive:

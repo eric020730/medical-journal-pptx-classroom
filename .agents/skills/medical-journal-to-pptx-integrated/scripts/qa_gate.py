@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce Sonnet, PDF-polarity, bilingual, asset, and built-PowerPoint gates."""
+"""Enforce deck, PDF-polarity, bilingual, asset, and presentation quality gates."""
 
 from __future__ import annotations
 
@@ -9,19 +9,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import deck_quality
 import qa_check
-import sonnet_gate
 
 
 def check_specification(spec: Path, *, mode: str, style: str) -> dict[str, Any]:
     """Run both independent prebuild validators against one canonical spec."""
     integrated = qa_check.validate_specification(spec, mode=mode)
-    report = sonnet_gate.Report()
+    report = deck_quality.Report()
     if integrated.get("stage") == "specification":
         try:
-            sonnet_gate.check_spec(spec, report, content_mode=mode, style=style)
+            deck_quality.check_spec(spec, report, content_mode=mode, style=style)
         except (OSError, ValueError, TypeError, KeyError) as error:
-            report.fail("sonnet_spec", str(error), "Repair the JSON deck specification.")
+            report.fail("deck_specification", str(error), "Repair the JSON deck specification.")
 
     failures = list(dict.fromkeys([
         *integrated.get("failures", []),
@@ -41,7 +41,7 @@ def check_specification(spec: Path, *, mode: str, style: str) -> dict[str, Any]:
         "image_polarity": integrated.get("image_polarity"),
         "failures": failures,
         "warnings": warnings,
-        "sonnet_checks": [
+        "deck_checks": [
             {"level": level, "check": check, "message": message, "fix": fix}
             for level, check, message, fix in report.items
         ],
@@ -51,16 +51,16 @@ def check_specification(spec: Path, *, mode: str, style: str) -> dict[str, Any]:
 def check_presentation(
     pptx: Path, *, spec: Path | None, mode: str, style: str
 ) -> dict[str, Any]:
-    """Run the final built-file and original Sonnet presentation validators."""
+    """Run independent built-file and teaching-presentation validators."""
     integrated = qa_check.validate_presentation(pptx, spec_path=spec, mode=mode)
-    report = sonnet_gate.Report()
+    report = deck_quality.Report()
     if integrated.get("stage") == "presentation":
         try:
-            sonnet_gate.check_pptx(
+            deck_quality.check_pptx(
                 pptx, report, spec, content_mode=mode, style=style
             )
         except (OSError, ValueError, TypeError, KeyError) as error:
-            report.fail("sonnet_pptx", str(error), "Rebuild the damaged PowerPoint.")
+            report.fail("deck_presentation", str(error), "Rebuild the damaged PowerPoint.")
 
     failures = list(dict.fromkeys([
         *integrated.get("failures", []),
@@ -76,7 +76,7 @@ def check_presentation(
         "style": style,
         "failures": failures,
         "warnings": warnings,
-        "sonnet_checks": [
+        "deck_checks": [
             {"level": level, "check": check, "message": message, "fix": fix}
             for level, check, message, fix in report.items
         ],

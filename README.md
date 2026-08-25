@@ -2,14 +2,14 @@
 
 把一篇醫學期刊 PDF 交給 Codex，產生可編輯的 PowerPoint：**英文投影片、繁體中文講者備註、論文 Figures／Tables，以及自動品質檢查**。
 
-本專案保留 `medical-journal-to-pptx v0.2.38-bg-aware-trim` 的完整圖片處理與簡報製作流程，並提供两種互相獨立的入口：原本的 classroom repository skill，以及 `v3.0.0` **可全域安裝、可在任何專案啟用的整合版 skill**。整合版固定使用 40–55 張的 full 模式，保留 standard／nice 視覺風格、Sonnet 雙階段 QA，以及 PDF 灰階反相與完整影像來源追蹤。
+本專案提供兩種互相獨立的入口：classroom repository skill，以及 `v4.0.0` **可全域安裝、可在任何專案啟用的整合版 skill**。整合版固定使用 40–55 張的 full 模式，支援 standard／nice 視覺風格、建檔前後雙階段 QA、PDF 灰階反相檢查與完整影像來源追蹤。
 
 > 這不是無需 AI 帳號的離線產生器。Python 腳本負責讀取 PDF、處理圖片、組裝與驗證 PowerPoint；理解論文、撰寫英文投影片及繁體中文講稿，仍需要可使用 Codex 的帳號。
 
 ## 推薦：安裝可在任何專案使用的全域整合版
 
 從 [最新 GitHub release](https://github.com/eric020730/medical-journal-pptx-classroom/releases/latest)
-下載 `medical-journal-to-pptx-integrated-v3.0.0.zip` 和 `.sha256`，驗證後完整解壓縮。
+下載 `medical-journal-to-pptx-integrated-v4.0.0.zip` 和 `.sha256`，驗證後完整解壓縮。
 
 macOS / Linux：
 
@@ -36,7 +36,7 @@ PDF 灰階／來源檢查，通過兩階段 QA 後儲存到指定輸出資料夾
 全域整合版只提供兩種完整教學組合：`standard + full` 與 `nice + full`。
 升級使用 `install-global.sh upgrade` 或
 `install-global.ps1 upgrade`；解除安裝使用 `uninstall`。安裝、升級及解除
-安裝都不會刪除既有 standard、Sonnet 或 nice skills。完整說明請見
+安裝都不會刪除任何其他全域 skills。完整說明請見
 [全域安裝、升級與解除安裝](docs/GLOBAL-INSTALL.md)。
 
 以下 classroom 操作仍保留，適合希望整個教材跟著 repository 移動的教學情境。
@@ -115,7 +115,7 @@ $medical-journal-to-pptx-classroom
 
 ## 雙階段 QA 與醫學影像反相防護
 
-部分期刊 PDF 使用特殊色彩空間或 `Decode` 設定：直接擷取內嵌 JPEG 時，CT、X 光或 MRI 可能變成黑白顛倒，但 PDF 檢視器的畫面仍然正確。`journal prepare` 會把每張原始圖與 PDF 實際渲染結果比對，記錄灰階相關性，並在 `.skill-work/<run-id>/extracted/polarity-report.json` 標記不安全來源。
+部分期刊 PDF 使用特殊色彩空間或 `Decode` 設定：直接擷取內嵌灰階圖片時可能變成黑白顛倒，但 PDF 檢視器的畫面仍然正確。`journal prepare` 會把每張原始圖與 PDF 實際渲染結果比對，記錄灰階相關性，並在 `.skill-work/<run-id>/extracted/polarity-report.json` 標記不安全來源。
 
 製作簡報時，請使用已套用 PDF 色彩解碼的 `extracted/figures/` 圖片，不要直接採用 `extracted/image_pXX_YY.*`。單張影像、裁切後的中間檔，以及由 A／B／C／D 組成的 Figure 都會追溯來源；如果發現黑白顛倒的圖進入最終素材，QA 會直接失敗。
 
@@ -167,14 +167,14 @@ Windows PowerShell 或命令提示字元：
 medical-journal-pptx-classroom/
 ├── .agents/skills/medical-journal-to-pptx-classroom/
 │   ├── SKILL.md                         學生版 skill 入口
-│   ├── VERSION                          原始 v0.2.38 版本
+│   ├── VERSION                          classroom skill 版本
 │   ├── scripts/                         完整圖片與 PowerPoint 管線
-│   ├── references/full_workflow_v0.2.38.md
+│   ├── references/                      classroom 完整流程參考
 │   └── assets/                          簡報 Logo 等資源
 ├── .agents/skills/medical-journal-to-pptx-integrated/
 │   ├── SKILL.md                         全域整合版簡潔入口
-│   ├── VERSION                          v3.0.0-global-integrated
-│   ├── scripts/                         雙視覺 builder、Sonnet QA、polarity
+│   ├── VERSION                          v4.0.0
+│   ├── scripts/                         雙視覺 builder、雙階段 QA、polarity
 │   └── references/                      完整流程、兩種風格、QA 來源鏈
 ├── docs/                                詳細安裝、教學與疑難排解
 ├── sample-papers/                       範例與學生自行放入的 PDF

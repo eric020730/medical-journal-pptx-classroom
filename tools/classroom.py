@@ -65,9 +65,9 @@ def ensure_directories() -> None:
 
 
 def semantic_version() -> str:
-    match = re.search(r"v\d+\.\d+\.\d+", CONFIG["upstream_version"])
+    match = re.search(r"v\d+\.\d+\.\d+", CONFIG["classroom_skill_version"])
     if match is None:
-        raise ValueError("Project upstream_version has no semantic version.")
+        raise ValueError("Project classroom_skill_version has no semantic version.")
     return match.group(0)
 
 
@@ -146,7 +146,7 @@ def find_binary(name: str) -> Path | None:
 
 
 def subprocess_environment() -> dict[str, str]:
-    """Expose discovered native tools to upstream scripts that call them by name."""
+    """Expose discovered native tools to bundled scripts that call them by name."""
     environment = dict(os.environ)
     prefixes: list[str] = []
     for name in ("soffice", "pdftoppm"):
@@ -257,7 +257,7 @@ def initialize_run(source_pdf: Path, mode: str) -> dict[str, Any]:
         "output_pptx": str(output),
         "output_pdf": str(output.with_suffix(".pdf")),
         "classroom_version": CONFIG["classroom_version"],
-        "upstream_version": CONFIG["upstream_version"],
+        "skill_version": CONFIG["classroom_skill_version"],
         "slide_budget": CONFIG["modes"][mode],
     }
 
@@ -270,7 +270,7 @@ def initialize_run(source_pdf: Path, mode: str) -> dict[str, Any]:
         f"- run_id: {run_id}",
         f"- mode: {mode}",
         f"- classroom_version: {CONFIG['classroom_version']}",
-        f"- upstream_version: {CONFIG['upstream_version']}",
+        f"- skill_version: {CONFIG['classroom_skill_version']}",
         f"- source_pdf: {source_pdf}",
         f"- source_sha256: {payload['source_sha256']}",
         "- content_generation: fresh_full_regeneration",
@@ -332,8 +332,8 @@ def environment_report(strict: bool = False) -> dict[str, Any]:
     )
     checks.append(
         check_result(
-            "Upstream v0.2.38",
-            "ok" if version_detail == CONFIG["upstream_version"] else "error",
+            "Classroom skill version",
+            "ok" if version_detail == CONFIG["classroom_skill_version"] else "error",
             version_detail,
         )
     )
@@ -401,7 +401,7 @@ def print_report(report: dict[str, Any], *, as_json: bool) -> None:
         return
     print(
         f"Medical Journal PPTX Classroom v{CONFIG['classroom_version']} "
-        f"| upstream {CONFIG['upstream_version']}"
+        f"| skill {CONFIG['classroom_skill_version']}"
     )
     print(f"Platform: {report['platform']}")
     print(f"Project:  {report['project_root']}")
@@ -426,18 +426,18 @@ def paths_payload() -> dict[str, Any]:
         "soffice": str(binary) if (binary := find_binary("soffice")) else None,
         "pdftoppm": str(binary) if (binary := find_binary("pdftoppm")) else None,
         "classroom_version": CONFIG["classroom_version"],
-        "upstream_version": CONFIG["upstream_version"],
+        "skill_version": CONFIG["classroom_skill_version"],
     }
 
 
-def resolve_upstream_script(name: str) -> Path:
+def resolve_skill_script(name: str) -> Path:
     normalized = name[:-3] if name.endswith(".py") else name
     if normalized not in SCRIPT_ALIASES:
         valid = ", ".join(sorted(SCRIPT_ALIASES))
-        raise ValueError(f"Unknown upstream script {name!r}; expected one of: {valid}")
+        raise ValueError(f"Unknown bundled script {name!r}; expected one of: {valid}")
     script = SKILL_SCRIPTS / SCRIPT_ALIASES[normalized]
     if not script.is_file():
-        raise FileNotFoundError(f"Upstream script missing: {script}")
+        raise FileNotFoundError(f"Bundled script missing: {script}")
     return script
 
 
@@ -555,7 +555,7 @@ def smoke_test(*, keep: bool, render: bool) -> dict[str, Any]:
         run_checked(
             [
                 sys.executable,
-                str(resolve_upstream_script("extract_from_pdf")),
+                str(resolve_skill_script("extract_from_pdf")),
                 str(paper),
                 "--out",
                 str(extracted),
@@ -585,7 +585,7 @@ def smoke_test(*, keep: bool, render: bool) -> dict[str, Any]:
         run_checked(
             [
                 sys.executable,
-                str(resolve_upstream_script("postprocess_assets")),
+                str(resolve_skill_script("postprocess_assets")),
                 "trim",
                 str(sources[0]),
                 str(figure),
@@ -644,7 +644,7 @@ def smoke_test(*, keep: bool, render: bool) -> dict[str, Any]:
         run_checked(
             [
                 sys.executable,
-                str(resolve_upstream_script("postprocess_assets")),
+                str(resolve_skill_script("postprocess_assets")),
                 "audit-final",
                 str(asset_directory),
                 "--spec",
@@ -668,7 +668,7 @@ def smoke_test(*, keep: bool, render: bool) -> dict[str, Any]:
         run_checked(
             [
                 sys.executable,
-                str(resolve_upstream_script("build_deck")),
+                str(resolve_skill_script("build_deck")),
                 str(spec_path),
                 "--out",
                 str(output),
@@ -728,7 +728,7 @@ def create_parser() -> argparse.ArgumentParser:
         run_parser.add_argument("--mode", choices=("lite", "full"), default="lite")
         run_parser.add_argument("--json", action="store_true")
 
-    run = subparsers.add_parser("run", help="Run an upstream v0.2.38 helper script")
+    run = subparsers.add_parser("run", help="Run a bundled image-processing helper script")
     run.add_argument("script")
     run.add_argument("arguments", nargs=argparse.REMAINDER)
 
@@ -792,7 +792,7 @@ def main(argv: list[str] | None = None) -> int:
             run_checked(
                 [
                     sys.executable,
-                    str(resolve_upstream_script("extract_from_pdf")),
+                    str(resolve_skill_script("extract_from_pdf")),
                     str(source),
                     "--out",
                     payload["extracted_dir"],
@@ -822,7 +822,7 @@ def main(argv: list[str] | None = None) -> int:
         arguments = args.arguments
         if arguments and arguments[0] == "--":
             arguments = arguments[1:]
-        run_checked([sys.executable, str(resolve_upstream_script(args.script)), *arguments])
+        run_checked([sys.executable, str(resolve_skill_script(args.script)), *arguments])
         return 0
 
     if args.command == "qa":

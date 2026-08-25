@@ -1,31 +1,12 @@
 #!/usr/bin/env python3
-"""
-qa_gate.py — one enforced quality gate for the medical-journal-to-pptx pipeline.
+"""Deterministically validate teaching-deck specifications and presentations.
 
-Why this exists
----------------
-Older versions of this skill relied on a long human-style checklist in SKILL.md
-that the model was supposed to read and self-attest ("[ ] every slide has
-notes", "[ ] no Chinese in visible text", ...). A strong model (Opus) can hold
-all of those rules in its head and honestly verify them. A weaker model tends to
-tick the boxes without really checking, or forget a rule under context pressure.
+Commands:
+  spec  <deck_spec.json>              validate content and assets before build
+  pptx  <deck.pptx> [--spec S]        validate the finished PowerPoint
+  all   <deck_spec.json> --pptx P     validate both required stages
 
-This script moves that judgment OUT of the model's head and INTO deterministic
-code. Instead of trusting the model to remember ~40 rules, we let it run one
-command that mechanically checks them and prints, for every failure, the exact
-fix to make. The model's job becomes the thing models are reliably good at:
-read a concrete error, fix that one thing, run again until green. That is why a
-Sonnet-class model using this gate can reach the quality that previously needed
-Opus — the invariants are enforced, not remembered.
-
-Modes
------
-  spec  <deck_spec.json>              content + asset checks (run before build)
-  pptx  <deck.pptx> [--spec S]        built-file checks (run after build)
-  all   <deck_spec.json> --pptx P     both (recommended final gate)
-
-Exit code is non-zero if ANY check fails, so the pipeline cannot advance past a
-broken deck. WARN items do not fail the build but should be looked at.
+Any failed invariant produces a nonzero exit status and a suggested repair.
 """
 
 from __future__ import annotations

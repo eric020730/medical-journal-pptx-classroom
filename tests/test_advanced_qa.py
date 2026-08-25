@@ -45,7 +45,7 @@ def full_spec() -> dict[str, object]:
     slides: list[dict[str, object]] = [
         {
             "type": "title",
-            "title": "Synthetic Imaging Study",
+            "title": "Synthetic Medical Study",
             "authors": "Education Team",
             "citation": "Synthetic Journal, 2026",
             "notes": "📚 這是虛構教學論文。",
@@ -67,7 +67,7 @@ def full_spec() -> dict[str, object]:
         {
             "type": "content",
             "title": f"Teaching Point {index}",
-            "body": ["Clinical context:", "Synthetic imaging findings", "→ Teaching takeaway"],
+            "body": ["Clinical context:", "Synthetic research findings", "→ Teaching takeaway"],
             "notes": "💡 此頁為繁體中文教學講稿。",
         }
         for index in range(1, 36)
@@ -97,7 +97,7 @@ def add_figure(
 ) -> dict[str, object]:
     slide: dict[str, object] = {
         "type": "figure",
-        "title": "Imaging Findings",
+        "title": "Research Findings",
         "image": f"final_assets/{asset.name}",
         "caption": caption,
         "notes": "🖼️【圖片說明】此圖為虛構教學影像。",
@@ -109,18 +109,23 @@ def add_figure(
     return slide
 
 
-def create_inverted_extraction(root: Path) -> tuple[Path, Path, Path]:
+def create_synthetic_inversion_fixture(
+    root: Path, *, source_size: tuple[int, int] | None = None, source_format: str = "PNG"
+) -> tuple[Path, Path, Path]:
     extracted = root / "extracted"
     figure_directory = extracted / "figures"
     figure_directory.mkdir(parents=True)
     source_pdf = root / "synthetic-inverted-image.pdf"
     raw_path = extracted / "image_p01_01.png"
     rendered_path = figure_directory / "Figure_01.png"
-    raw = ImageOps.invert(patterned_image())
+    source = patterned_image()
+    if source_size is not None:
+        source = source.resize(source_size)
+    raw = ImageOps.invert(source)
     raw.save(raw_path)
 
     stream = BytesIO()
-    raw.save(stream, format="PNG")
+    raw.save(stream, format=source_format)
     document = pymupdf.open()
     page = document.new_page(width=300, height=240)
     rectangle = pymupdf.Rect(30, 30, 250, 210)
@@ -165,7 +170,7 @@ class ImagePolarityTests(unittest.TestCase):
 
     def test_pdf_decode_array_detects_unsafe_raw_image(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            manifest, raw, rendered = create_inverted_extraction(Path(temporary))
+            manifest, raw, rendered = create_synthetic_inversion_fixture(Path(temporary))
             report = image_polarity.audit_extraction(manifest)
             self.assertTrue(report["ok"])
             self.assertEqual(report["unsafe_raw_streams"], 1)
@@ -178,7 +183,7 @@ class ImagePolarityTests(unittest.TestCase):
 
     def test_inverted_rendered_figure_fails_extraction(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            manifest, raw, rendered = create_inverted_extraction(Path(temporary))
+            manifest, raw, rendered = create_synthetic_inversion_fixture(Path(temporary))
             rendered.write_bytes(raw.read_bytes())
             report = image_polarity.audit_extraction(manifest, persist=False)
             self.assertFalse(report["ok"])
@@ -187,7 +192,7 @@ class ImagePolarityTests(unittest.TestCase):
     def test_final_asset_cannot_use_inverted_raw_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest, raw, _ = create_inverted_extraction(root)
+            manifest, raw, _ = create_synthetic_inversion_fixture(root)
             report = image_polarity.audit_extraction(manifest, persist=False)
             asset = write_asset(root, "Figure_1.png", source=str(raw))
             spec = full_spec()
@@ -199,7 +204,7 @@ class ImagePolarityTests(unittest.TestCase):
     def test_composite_asset_cannot_hide_inverted_panel_input(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest, raw, rendered = create_inverted_extraction(root)
+            manifest, raw, rendered = create_synthetic_inversion_fixture(root)
             report = image_polarity.audit_extraction(manifest, persist=False)
             asset = write_asset(root, "Figure_1.png", source_inputs=[str(rendered), str(raw)])
             spec = full_spec()
@@ -211,7 +216,7 @@ class ImagePolarityTests(unittest.TestCase):
     def test_rendered_source_passes_final_asset_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest, _, rendered = create_inverted_extraction(root)
+            manifest, _, rendered = create_synthetic_inversion_fixture(root)
             report = image_polarity.audit_extraction(manifest, persist=False)
             asset = write_asset(root, "Figure_1.png", source=str(rendered))
             spec = full_spec()
@@ -222,7 +227,7 @@ class ImagePolarityTests(unittest.TestCase):
     def test_modified_final_image_is_checked_even_when_source_is_safe(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest, _, rendered = create_inverted_extraction(root)
+            manifest, _, rendered = create_synthetic_inversion_fixture(root)
             report = image_polarity.audit_extraction(manifest, persist=False)
             asset = write_asset(root, "Figure_1.png", source=str(rendered))
             ImageOps.invert(patterned_image()).save(asset)
@@ -235,7 +240,7 @@ class ImagePolarityTests(unittest.TestCase):
     def test_intermediate_sidecar_cannot_hide_unsafe_original_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest, raw, _ = create_inverted_extraction(root)
+            manifest, raw, _ = create_synthetic_inversion_fixture(root)
             report = image_polarity.audit_extraction(manifest, persist=False)
             intermediate = write_asset(root, "Intermediate.png", source=str(raw))
             asset = write_asset(root, "Figure_1.png", source=str(intermediate))
@@ -368,7 +373,7 @@ class AdvancedSpecificationTests(unittest.TestCase):
         self.assertFailureContains("Figure 1 appears on multiple slides")
 
     def test_spec_gate_detects_inverted_panel_provenance(self) -> None:
-        _, raw, _ = create_inverted_extraction(self.root)
+        _, raw, _ = create_synthetic_inversion_fixture(self.root)
         asset = write_asset(self.root, "Figure_1.png", source_inputs=[str(raw)])
         add_figure(self.spec, asset)
         self.assertFailureContains("inverted raw PDF image")
@@ -391,7 +396,7 @@ class PortableIntegrationTests(unittest.TestCase):
             subprocess.run(
                 [
                     sys.executable,
-                    str(classroom.resolve_upstream_script("recompose_panels_aligned")),
+                    str(classroom.resolve_skill_script("recompose_panels_aligned")),
                     str(output),
                     "--inputs",
                     str(first),
@@ -417,7 +422,7 @@ class PortableIntegrationTests(unittest.TestCase):
             subprocess.run(
                 [
                     sys.executable,
-                    str(classroom.resolve_upstream_script("recompose_panels_banded")),
+                    str(classroom.resolve_skill_script("recompose_panels_banded")),
                     str(output),
                     "--inputs",
                     str(first),
@@ -448,7 +453,7 @@ class PortableIntegrationTests(unittest.TestCase):
             subprocess.run(
                 [
                     sys.executable,
-                    str(classroom.resolve_upstream_script("postprocess_assets")),
+                    str(classroom.resolve_skill_script("postprocess_assets")),
                     "recompose-panels",
                     str(output),
                     "--inputs",

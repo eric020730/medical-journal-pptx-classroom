@@ -14,7 +14,7 @@ $medical-journal-to-pptx-classroom
 優先保留 Figure 1，完成 QA 後輸出到 outputs。
 ```
 
-Lite skill 入口只保留必要流程；較長的 v0.2.38 完整規格只會在要求 `full` 模式時載入，以降低初始閱讀與推理負擔。
+Lite skill 入口只保留必要流程；較長的完整規格只會在要求 `full` 模式時載入，以降低初始閱讀與推理負擔。
 
 ## 如果 skill 沒有出現在選單
 

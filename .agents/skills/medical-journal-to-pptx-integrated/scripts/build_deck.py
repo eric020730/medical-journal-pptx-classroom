@@ -73,7 +73,7 @@ def build(
 
     normalized = normalize_specification(specification, style=style)
     if style == "standard":
-        # Legacy builders print logo diagnostics; keep machine-readable JSON clean.
+        # Underlying builders print logo diagnostics; keep machine-readable JSON clean.
         with contextlib.redirect_stdout(sys.stderr):
             presentation = build_deck_standard.build(
                 normalized,

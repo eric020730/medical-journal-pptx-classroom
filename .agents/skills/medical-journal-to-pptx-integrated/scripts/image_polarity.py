@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare extracted radiology images against their rendered PDF appearance."""
+"""Compare extracted medical-journal images with their rendered PDF appearance."""
 
 from __future__ import annotations
 

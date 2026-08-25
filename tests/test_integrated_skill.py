@@ -20,7 +20,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from test_advanced_qa import (
     add_figure,
-    create_inverted_extraction,
+    create_synthetic_inversion_fixture,
     full_spec,
     patterned_image,
     write_asset,
@@ -34,10 +34,10 @@ SKILL_NAME = "medical-journal-to-pptx-integrated"
 SKILL_ROOT = PROJECT_ROOT / ".agents" / "skills" / SKILL_NAME
 SKILL_RUNNER = SKILL_ROOT / "scripts" / "run.py"
 INSTALLER = PROJECT_ROOT / "install-global.py"
-LEGACY_SKILLS = (
-    "medical-journal-to-pptx",
-    "medical-journal-to-ppts-sonnet5",
-    "medical-journal-to-pptx-nice",
+EXISTING_SKILLS = (
+    "existing-medical-skill-a",
+    "existing-medical-skill-b",
+    "existing-medical-skill-c",
 )
 
 
@@ -74,7 +74,7 @@ class IntegratedSkillStructureTests(unittest.TestCase):
         self.assertNotIn("--mode lite", content)
         self.assertEqual(
             (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
-            "v3.0.0-global-integrated",
+            "v4.0.0",
         )
 
     def test_skill_preserves_all_image_building_and_quality_helpers(self) -> None:
@@ -82,7 +82,7 @@ class IntegratedSkillStructureTests(unittest.TestCase):
             "extract_from_pdf.py", "postprocess_assets.py", "crop_vector_figure.py",
             "recompose_panels_aligned.py", "recompose_panels_banded.py", "add_panel_labels.py",
             "measure_label_gaps.py", "build_deck.py", "build_deck_standard.py",
-            "build_deck_nice.py", "image_polarity.py", "sonnet_gate.py", "qa_gate.py",
+            "build_deck_nice.py", "image_polarity.py", "deck_quality.py", "qa_gate.py",
             "workflow.py", "run.py",
         }
         actual = {path.name for path in (SKILL_ROOT / "scripts").glob("*.py")}
@@ -94,8 +94,9 @@ class IntegratedSkillStructureTests(unittest.TestCase):
 
     def test_full_reference_and_both_visual_references_are_bundled(self) -> None:
         for name in (
-            "full_workflow_v0.2.38.md", "visual_style.md", "visual_style_nice.md",
-            "quality_gates.md", "deck_spec_schema.md", "notes_style.md",
+            "full_workflow.md", "visual_style.md", "visual_style_nice.md",
+            "quality_gates.md", "script_quality_expectations.md",
+            "deck_spec_schema.md", "notes_style.md",
         ):
             with self.subTest(reference=name):
                 self.assertTrue((SKILL_ROOT / "references" / name).is_file())
@@ -148,21 +149,21 @@ class GlobalInstallationTests(unittest.TestCase):
             )
         self.assertEqual(installer.global_skills_directory({}), Path.home() / ".agents" / "skills")
 
-    def test_install_upgrade_and_uninstall_preserve_all_legacy_skills(self) -> None:
+    def test_install_upgrade_and_uninstall_preserve_all_existing_skills(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             skills = root / "global skills"
-            for name in LEGACY_SKILLS:
-                legacy = skills / name
-                legacy.mkdir(parents=True)
-                (legacy / "preserve.txt").write_text("keep this legacy skill", encoding="utf-8")
+            for name in EXISTING_SKILLS:
+                existing = skills / name
+                existing.mkdir(parents=True)
+                (existing / "preserve.txt").write_text("keep this skill", encoding="utf-8")
 
             installed = invoke(INSTALLER, "install", "--target", skills, "--skip-deps", "--json", cwd=root)
             self.assertEqual(installed.returncode, 0, msg=installed.stderr)
             payload = json.loads(installed.stdout)
             destination = skills / SKILL_NAME
             self.assertEqual(Path(payload["install_path"]), destination)
-            self.assertEqual(payload["legacy_skills_removed"], [])
+            self.assertEqual(payload["other_skills_removed"], [])
 
             unrelated = root / "unrelated workspace"
             unrelated.mkdir()
@@ -177,7 +178,7 @@ class GlobalInstallationTests(unittest.TestCase):
             removed = invoke(INSTALLER, "uninstall", "--target", skills, "--json", cwd=root)
             self.assertEqual(removed.returncode, 0, msg=removed.stderr)
             self.assertFalse(destination.exists())
-            for name in LEGACY_SKILLS:
+            for name in EXISTING_SKILLS:
                 self.assertTrue((skills / name / "preserve.txt").is_file(), msg=name)
 
     def test_install_refuses_to_overwrite_an_existing_integrated_skill(self) -> None:
@@ -211,8 +212,8 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["slides"], expected_slides)
-            self.assertTrue(payload["sonnet_prebuild_qa"])
-            self.assertTrue(payload["sonnet_postbuild_qa"])
+            self.assertTrue(payload["prebuild_qa"])
+            self.assertTrue(payload["postbuild_qa"])
             output = Path(payload["work_dir"]) / f"synthetic_{style}_{mode}.pptx"
             self.assertTrue(output.is_file())
             presentation = Presentation(str(output))
@@ -237,7 +238,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
             self.assertEqual(payload["mode"], "full")
             self.assertEqual(payload["slides"], 40)
 
-    def test_retired_lite_mode_is_rejected_by_every_public_entrypoint(self) -> None:
+    def test_unsupported_lite_mode_is_rejected_by_every_public_entrypoint(self) -> None:
         commands = (
             (SKILL_RUNNER, "init-run", "missing.pdf", "--mode", "lite"),
             (SKILL_RUNNER, "prepare", "missing.pdf", "--mode", "lite"),
@@ -260,7 +261,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
                 "--mode", "lite",
             ),
             (
-                SKILL_ROOT / "scripts" / "sonnet_gate.py", "spec", "missing.json",
+                SKILL_ROOT / "scripts" / "deck_quality.py", "spec", "missing.json",
                 "--content-mode", "lite",
             ),
         )
@@ -274,11 +275,11 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
     def check_native_panel_labels(self, style: str) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            _, _, rendered = create_inverted_extraction(root)
+            _, _, rendered = create_synthetic_inversion_fixture(root)
             first = write_asset(root, "panel-A.png", source=str(rendered))
             second = write_asset(root, "panel-B.png", source=str(rendered))
             assets = root / "final_assets"
-            composite = assets / "Figure_4.png"
+            composite = assets / "Figure_01.png"
             geometry = root / "panel_geometry.json"
             width, height = ("12.13", "4.95") if style == "nice" else ("12.10", "4.85")
             recomposed = invoke(
@@ -292,7 +293,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
 
             spec = full_spec()
             add_figure(
-                spec, composite, caption="Figure 4. Synthetic multi-panel example.",
+                spec, composite, caption="Figure 1. Synthetic multi-panel example.",
                 notes="【圖片說明】🖼️【A 圖】與【B 圖】為虛構教學影像。",
             )
             spec_path = write_spec(root, spec)
@@ -383,11 +384,11 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
     def check_specified_panel_labels(self, style: str) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            _, _, rendered = create_inverted_extraction(root)
-            figure = write_asset(root, "Figure_4.png", source=str(rendered))
+            _, _, rendered = create_synthetic_inversion_fixture(root)
+            figure = write_asset(root, "Figure_01.png", source=str(rendered))
             spec = full_spec()
             add_figure(
-                spec, figure, caption="Figure 4. Synthetic A/B panels.",
+                spec, figure, caption="Figure 1. Synthetic A/B panels.",
                 panel_labels=["A", "B"], panel_label_x_fracs=[0.45, 0.95],
                 notes="【圖片說明】🖼️【A 圖】與【B 圖】為虛構教學影像。",
             )
@@ -427,7 +428,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
             self.assertTrue(any("missing visible native panel" in value for value in report["failures"]))
             self.assertTrue(any(
                 check["check"] == "pptx_panel_labels" and check["level"] == "FAIL"
-                for check in report["presentation"]["sonnet_checks"]
+                for check in report["presentation"]["deck_checks"]
             ))
 
     def test_standard_renders_spec_panel_labels_and_final_gate_detects_removal(self) -> None:
@@ -440,7 +441,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
 class IntegratedImageRegressionTests(unittest.TestCase):
     def test_pdf_decode_array_is_detected_by_the_bundled_global_skill(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            manifest, raw, rendered = create_inverted_extraction(Path(temporary))
+            manifest, raw, rendered = create_synthetic_inversion_fixture(Path(temporary))
             result = invoke(SKILL_RUNNER, "image-qa", manifest, "--json")
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             report = json.loads(result.stdout)
@@ -448,23 +449,23 @@ class IntegratedImageRegressionTests(unittest.TestCase):
             self.assertEqual(report["figures"][0]["source_path"], str(raw.resolve()))
             self.assertEqual(report["figures"][0]["rendered_path"], str(rendered.resolve()))
 
-    def test_panel_4b_and_figure_5_reject_inverted_intermediate_source_chains(self) -> None:
+    def test_synthetic_multiasset_chain_rejects_inverted_intermediate_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            _, raw, rendered = create_inverted_extraction(root)
-            intermediate = write_asset(root, "Figure_4B_intermediate.png", source=str(raw))
+            _, raw, rendered = create_synthetic_inversion_fixture(root)
+            intermediate = write_asset(root, "Figure_01_panel_b_intermediate.png", source=str(raw))
             panel_figure = write_asset(
-                root, "Figure_4.png", source_inputs=[str(rendered), str(intermediate)], native_labels=True
+                root, "Figure_01.png", source_inputs=[str(rendered), str(intermediate)], native_labels=True
             )
-            single_figure = write_asset(root, "Figure_5.png", source=str(raw))
+            single_figure = write_asset(root, "Figure_02.png", source=str(raw))
             spec = full_spec()
-            first = add_figure(spec, panel_figure, caption="Figure 4. Synthetic A/B panels.")
+            first = add_figure(spec, panel_figure, caption="Figure 1. Synthetic A/B panels.")
             slides = spec["slides"]
             assert isinstance(slides, list)
             slides[4] = {
                 **first,
                 "image": f"final_assets/{single_figure.name}",
-                "caption": "Figure 5. Synthetic grayscale regression.",
+                "caption": "Figure 2. Synthetic grayscale regression.",
             }
             path = write_spec(root, spec)
             result = invoke(SKILL_RUNNER, "qa-spec", path, "--mode", "full", "--style", "nice", "--json")
@@ -476,27 +477,27 @@ class IntegratedImageRegressionTests(unittest.TestCase):
     def test_safe_decoded_panel_sources_pass_the_integrated_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            _, _, rendered = create_inverted_extraction(root)
-            figure = write_asset(root, "Figure_5.png", source=str(rendered))
+            _, _, rendered = create_synthetic_inversion_fixture(root)
+            figure = write_asset(root, "Figure_01.png", source=str(rendered))
             spec = full_spec()
-            add_figure(spec, figure, caption="Figure 5. Synthetic corrected grayscale.")
+            add_figure(spec, figure, caption="Figure 1. Synthetic corrected grayscale.")
             result = invoke(SKILL_RUNNER, "qa-spec", write_spec(root, spec), "--mode", "full", "--json")
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             self.assertEqual(json.loads(result.stdout)["image_polarity"]["unsafe_raw_streams"], 1)
 
-    def test_cropped_figure_4b_without_intermediate_sidecar_cannot_bypass_polarity(self) -> None:
+    def test_synthetic_orphan_panel_without_sidecar_cannot_bypass_polarity(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            _, raw, rendered = create_inverted_extraction(root)
-            orphan = root / "orphan_Figure_4B_intermediate.png"
+            _, raw, rendered = create_synthetic_inversion_fixture(root)
+            orphan = root / "orphan_Figure_01_panel_b_intermediate.png"
             with Image.open(raw) as inverted:
                 inverted.crop((0, 0, 80, inverted.height)).save(orphan)
             figure = write_asset(
-                root, "Figure_4.png", source_inputs=[str(rendered), str(orphan)], native_labels=True
+                root, "Figure_01.png", source_inputs=[str(rendered), str(orphan)], native_labels=True
             )
             spec = full_spec()
             add_figure(
-                spec, figure, caption="Figure 4. Synthetic A/B panels.",
+                spec, figure, caption="Figure 1. Synthetic A/B panels.",
                 panel_labels=["A", "B"], panel_label_x_fracs=[0.5, 1.0],
             )
             result = invoke(
@@ -510,9 +511,9 @@ class IntegratedImageRegressionTests(unittest.TestCase):
     def test_raster_figure_without_extraction_manifest_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            figure = write_asset(root, "Figure_4.png")
+            figure = write_asset(root, "Figure_01.png")
             spec = full_spec()
-            add_figure(spec, figure, caption="Figure 4. Synthetic unverified panel.")
+            add_figure(spec, figure, caption="Figure 1. Synthetic unverified panel.")
             result = invoke(
                 SKILL_RUNNER, "qa-spec", write_spec(root, spec), "--mode", "full", "--json"
             )
@@ -525,13 +526,13 @@ class IntegratedImageRegressionTests(unittest.TestCase):
     def test_pdf_rendered_vector_flowchart_preserves_audited_pdf_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest, _, _ = create_inverted_extraction(root)
+            manifest, _, _ = create_synthetic_inversion_fixture(root)
             source_pdf = json.loads(manifest.read_text(encoding="utf-8"))["pdf"]
             figure = write_asset(
-                root, "Figure_2.png", source=source_pdf, asset_type="flowchart"
+                root, "Figure_01.png", source=source_pdf, asset_type="flowchart"
             )
             spec = full_spec()
-            add_figure(spec, figure, caption="Figure 2. PDF-rendered vector flowchart.")
+            add_figure(spec, figure, caption="Figure 1. PDF-rendered vector flowchart.")
             result = invoke(
                 SKILL_RUNNER, "qa-spec", write_spec(root, spec), "--mode", "full", "--json"
             )
@@ -557,7 +558,7 @@ class StandaloneReleaseTests(unittest.TestCase):
         for private in (
             Path("patients.csv"), Path("private-patient-image.png"), Path("credentials.yaml"),
             Path("api-token.txt"), Path("id_rsa"), Path("notes/patient-history.docx"),
-            Path("skill-work/Figure_4B.png"), skill_prefix / "assets" / "patient-ct.png",
+            Path("skill-work/synthetic-panel.png"), skill_prefix / "assets" / "private-clinical-image.png",
             skill_prefix / "agents" / "credentials.yaml", skill_prefix / "references" / "patient.csv",
             skill_prefix / "scripts" / "token.txt", Path("docs") / "patient-history.md",
         ):
@@ -644,13 +645,12 @@ class StandaloneReleaseTests(unittest.TestCase):
             self.assertTrue((target / SKILL_NAME / "scripts" / "workflow.py").is_file())
 
 
-@unittest.skipUnless(os.environ.get("MEDICAL_JOURNAL_REAL_PDF"), "Private real-paper regression not configured")
-class OptionalPrivateLungPaperRegression(unittest.TestCase):
-    def test_original_figure_4b_and_figure_5_streams_are_corrected(self) -> None:
-        paper = Path(os.environ["MEDICAL_JOURNAL_REAL_PDF"])
-        self.assertTrue(paper.is_file())
+class SyntheticPrepareRegression(unittest.TestCase):
+    def test_prepare_detects_and_corrects_a_synthetic_decode_inversion(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            create_synthetic_inversion_fixture(root, source_size=(280, 240), source_format="JPEG")
+            paper = root / "synthetic-inverted-image.pdf"
             result = invoke(
                 SKILL_RUNNER, "prepare", paper, "--workspace", root,
                 "--output-dir", root, "--mode", "full", "--style", "standard", "--json",
@@ -660,8 +660,8 @@ class OptionalPrivateLungPaperRegression(unittest.TestCase):
             payload = json.loads(result.stdout)
             report = json.loads(Path(payload["image_polarity_audit"]["report"]).read_text(encoding="utf-8"))
             unsafe = [entry for entry in report["figures"] if entry["raw"]["status"] == "inverted"]
-            self.assertGreaterEqual(len(unsafe), 2)
-            self.assertTrue({8, 9}.issubset({entry["page"] for entry in unsafe}))
+            self.assertGreaterEqual(len(unsafe), 1)
+            self.assertEqual({entry["page"] for entry in unsafe}, {1})
             self.assertTrue(all(entry["rendered_polarity"]["status"] == "correct" for entry in unsafe))
 
 

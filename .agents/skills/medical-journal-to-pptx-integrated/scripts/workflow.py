@@ -54,7 +54,7 @@ SCRIPT_ALIASES = {
     "make_demo_paper": "make_demo_paper.py",
     "image_polarity": "image_polarity.py",
     "qa_gate": "qa_gate.py",
-    "sonnet_gate": "sonnet_gate.py",
+    "deck_quality": "deck_quality.py",
 }
 WINDOWS_RESERVED = {
     "CON", "PRN", "AUX", "NUL",
@@ -293,7 +293,7 @@ def render_presentation(pptx: Path) -> dict[str, Any]:
 def _synthetic_spec(asset: Path, *, mode: str, manifest: Path) -> dict[str, Any]:
     target = MODES[mode]["minimum_slides"]
     slides: list[dict[str, Any]] = [{
-        "type": "title", "title": "Synthetic Medical Imaging Study",
+        "type": "title", "title": "Synthetic Medical Research Study",
         "authors": "Synthetic Education Team", "citation": "Fictional Journal, 2026",
         "notes": "📚 此篇為虛構教學示例，不可作為臨床證據。",
     }]
@@ -304,20 +304,20 @@ def _synthetic_spec(asset: Path, *, mode: str, manifest: Path) -> dict[str, Any]
     })
     slides.append({
         "type": "part", "number": 1, "title": "Study Design",
-        "notes": "🔎 本段介紹虛構研究設計與影像判讀。",
+        "notes": "🔎 本段介紹虛構研究設計與圖表判讀。",
     })
     trailing = 3
     for index in range(target - len(slides) - trailing):
         slides.append({
             "type": "content", "title": f"Teaching Point {index + 1}",
-            "body": ["Clinical context:", "Synthetic imaging findings", "→ Teaching takeaway"],
+            "body": ["Clinical context:", "Synthetic research findings", "→ Teaching takeaway"],
             "notes": "💡 **Synthetic study**（虛構研究）僅用於測試簡報流程。",
         })
     slides.append({
-        "type": "figure", "title": "Imaging Findings",
+        "type": "figure", "title": "Research Findings",
         "image": f"final_assets/{asset.name}",
-        "caption": "Figure 1. Fictional educational imaging example.",
-        "notes": "【圖片說明 — Figure 1】🖼️ 此圖為虛構教學影像。",
+        "caption": "Figure 1. Synthetic educational research illustration.",
+        "notes": "【圖片說明 — Figure 1】🖼️ 此圖為完全合成的教學圖表。",
     })
     slides.append({
         "type": "references", "title": "References",
@@ -383,8 +383,8 @@ def smoke_test(*, workspace: Path, mode: str, style: str, keep: bool = False) ->
             "style": style,
             "slides": built["slides"],
             "image_polarity": True,
-            "sonnet_prebuild_qa": True,
-            "sonnet_postbuild_qa": True,
+            "prebuild_qa": True,
+            "postbuild_qa": True,
             "work_dir": str(root) if keep else None,
         }
     finally:
