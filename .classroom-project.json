@@ -1,0 +1,26 @@
+{
+  "project_name": "medical-journal-pptx-classroom",
+  "classroom_version": "1.0.0",
+  "skill_name": "medical-journal-to-pptx-classroom",
+  "upstream_skill_name": "medical-journal-to-pptx",
+  "upstream_version": "v0.2.38-bg-aware-trim",
+  "python_minimum": "3.11",
+  "python_maximum_tested": "3.13",
+  "directories": {
+    "papers": "sample-papers",
+    "outputs": "outputs",
+    "work": ".skill-work"
+  },
+  "modes": {
+    "lite": {
+      "minimum_slides": 8,
+      "maximum_slides": 16,
+      "description": "Low-context classroom practice and constrained Codex plans"
+    },
+    "full": {
+      "minimum_slides": 40,
+      "maximum_slides": 55,
+      "description": "Complete v0.2.38 medical-journal teaching workflow"
+    }
+  }
+}

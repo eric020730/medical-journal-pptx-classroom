@@ -1,0 +1,43 @@
+name: Student installation issue
+description: Report a macOS or Windows setup problem without sharing private documents.
+title: "[Setup]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not upload journal PDFs, patient information, API keys, student presentations,
+        or unredacted computer paths.
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - macOS Apple Silicon
+        - macOS Intel
+        - Windows 11
+        - Windows 10
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: setup-step
+    attributes:
+      label: Step that failed
+      options:
+        - Installing Homebrew or WinGet
+        - Installing Python
+        - Installing LibreOffice or Poppler
+        - Installing Python packages
+        - Running journal doctor
+        - Running the PowerPoint smoke test
+        - Discovering the Codex skill
+        - Generating a student presentation
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message
+      description: Remove usernames, patient information, and sensitive paths.
+    validations:
+      required: true

@@ -1,0 +1,30 @@
+# Python environments and caches are machine-specific.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+dist/
+
+# Never publish papers, patient data, working files, or generated presentations.
+.skill-work/
+sample-papers/*
+!sample-papers/README.md
+!sample-papers/classroom-demo-paper.pdf
+outputs/*
+!outputs/.gitkeep
+*.pptx
+
+# Local operating-system and editor files.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+
+# Logs and local reports.
+*.log
+diagnostics.json
+/RELEASE-MANIFEST.txt

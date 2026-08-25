@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_PYTHON="${PROJECT_ROOT}/.venv/bin/python"
+
+if [[ ! -x "${PROJECT_PYTHON}" ]]; then
+  printf 'Project Python environment is missing. Run ./setup-macos.command first.\n' >&2
+  exit 1
+fi
+
+exec "${PROJECT_PYTHON}" "${PROJECT_ROOT}/tools/classroom.py" "$@"
