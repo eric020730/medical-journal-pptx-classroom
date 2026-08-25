@@ -13,11 +13,6 @@
     "work": ".skill-work"
   },
   "modes": {
-    "lite": {
-      "minimum_slides": 8,
-      "maximum_slides": 16,
-      "description": "Low-context classroom practice and constrained Codex plans"
-    },
     "full": {
       "minimum_slides": 40,
       "maximum_slides": 55,

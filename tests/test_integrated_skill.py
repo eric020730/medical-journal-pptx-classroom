@@ -71,7 +71,7 @@ class IntegratedSkillStructureTests(unittest.TestCase):
         self.assertLess(len(content.splitlines()), 110)
         self.assertIn("40–55 slides", content)
         self.assertIn("`full` is the only supported content mode", content)
-        self.assertNotIn("--mode lite", content)
+        self.assertIn("--mode full", content)
         self.assertEqual(
             (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
             "v4.0.0",
@@ -243,38 +243,38 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
             self.assertEqual(payload["mode"], "full")
             self.assertEqual(payload["slides"], 40)
 
-    def test_unsupported_lite_mode_is_rejected_by_every_public_entrypoint(self) -> None:
+    def test_unsupported_content_mode_is_rejected_by_every_public_entrypoint(self) -> None:
         commands = (
-            (SKILL_RUNNER, "init-run", "missing.pdf", "--mode", "lite"),
-            (SKILL_RUNNER, "prepare", "missing.pdf", "--mode", "lite"),
-            (SKILL_RUNNER, "qa-spec", "missing.json", "--mode", "lite"),
+            (SKILL_RUNNER, "init-run", "missing.pdf", "--mode", "unsupported"),
+            (SKILL_RUNNER, "prepare", "missing.pdf", "--mode", "unsupported"),
+            (SKILL_RUNNER, "qa-spec", "missing.json", "--mode", "unsupported"),
             (
                 SKILL_RUNNER, "qa", "missing.pptx", "--spec", "missing.json",
-                "--mode", "lite",
+                "--mode", "unsupported",
             ),
             (
                 SKILL_RUNNER, "build", "missing.json", "--out", "missing.pptx",
-                "--mode", "lite",
+                "--mode", "unsupported",
             ),
-            (SKILL_RUNNER, "smoke-test", "--mode", "lite"),
+            (SKILL_RUNNER, "smoke-test", "--mode", "unsupported"),
             (
                 SKILL_ROOT / "scripts" / "qa_gate.py", "spec", "missing.json",
-                "--mode", "lite",
+                "--mode", "unsupported",
             ),
             (
                 SKILL_ROOT / "scripts" / "qa_check.py", "missing.json", "--spec-only",
-                "--mode", "lite",
+                "--mode", "unsupported",
             ),
             (
                 SKILL_ROOT / "scripts" / "deck_quality.py", "spec", "missing.json",
-                "--content-mode", "lite",
+                "--content-mode", "unsupported",
             ),
         )
         for command in commands:
             with self.subTest(command=[str(value) for value in command]):
                 rejected = invoke(*command)
                 self.assertNotEqual(rejected.returncode, 0)
-                self.assertIn("invalid choice: 'lite'", rejected.stderr)
+                self.assertIn("invalid choice: 'unsupported'", rejected.stderr)
                 self.assertIn("{full}", rejected.stderr)
 
     def check_native_panel_labels(self, style: str) -> None:

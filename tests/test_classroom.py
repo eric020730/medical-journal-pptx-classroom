@@ -32,6 +32,18 @@ class ClassroomProjectTests(unittest.TestCase):
             (classroom.SKILL_ROOT / "references" / "full_workflow_v0.2.38.md").is_file()
         )
 
+    def test_classroom_supports_and_defaults_to_full_presentation_mode(self) -> None:
+        self.assertEqual(tuple(classroom.CONFIG["modes"]), ("full",))
+        parser = classroom.create_parser()
+        for arguments in (
+            ("init-run", "paper.pdf"),
+            ("prepare", "paper.pdf"),
+            ("qa", "presentation.pptx"),
+            ("qa-spec", "deck_spec.json"),
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(parser.parse_args(arguments).mode, "full")
+
     def test_all_classroom_executable_helpers_are_preserved(self) -> None:
         for alias, filename in classroom.SCRIPT_ALIASES.items():
             with self.subTest(alias=alias):
@@ -124,9 +136,9 @@ class ClassroomProjectTests(unittest.TestCase):
             source = root / "paper.pdf"
             source.write_bytes(b"%PDF-1.7\n")
             with mock.patch.multiple(classroom, PAPERS_DIR=papers, OUTPUTS_DIR=outputs, WORK_DIR=work):
-                first = classroom.allocate_output(source, "lite")
+                first = classroom.allocate_output(source, "full")
                 first.touch()
-                second = classroom.allocate_output(source, "lite")
+                second = classroom.allocate_output(source, "full")
                 self.assertNotEqual(first, second)
                 self.assertTrue(second.name.endswith("-2.pptx"))
 
@@ -189,7 +201,7 @@ class ClassroomProjectTests(unittest.TestCase):
         self.assertFalse(qa_check.has_emoji("繁體中文講稿"))
 
     def test_qa_rejects_missing_powerpoint(self) -> None:
-        report = qa_check.validate_presentation(Path("missing.pptx"), mode="lite")
+        report = qa_check.validate_presentation(Path("missing.pptx"), mode="full")
         self.assertFalse(report["ok"])
         self.assertIn("not found", report["failures"][0])
 

@@ -1,6 +1,6 @@
 ---
 name: "medical-journal-to-pptx-classroom"
-description: "Turn a medical journal PDF into an editable teaching PowerPoint with English slides, Traditional Chinese speaker notes, extracted figures and tables, PDF image-inversion protection, advanced two-stage QA, cross-platform local tooling, and either an 8-16-slide classroom mode or the full upstream v0.2.38 40-55-slide workflow."
+description: "Turn a medical journal PDF into a complete 40-55-slide editable teaching PowerPoint with English slides, Traditional Chinese speaker notes, extracted figures and tables, PDF image-inversion protection, advanced two-stage QA, and cross-platform local tooling."
 ---
 
 # Medical Journal to PPTX: Portable Classroom Edition
@@ -27,15 +27,15 @@ Other useful commands:
 
 ```text
 journal paths --json
-journal init-run "path/to/paper.pdf" --mode lite --json
+journal init-run "path/to/paper.pdf" --mode full --json
 journal prepare "path/to/paper.pdf" --mode full --json
 journal run extract_from_pdf "paper.pdf" --out ".skill-work/run/extracted"
 journal run postprocess_assets trim input.png output.png --asset-type figure
 journal run postprocess_assets audit-final final_assets --spec deck_spec.json
 journal image-qa extracted/manifest.json --spec deck_spec.json
-journal qa-spec deck_spec.json --mode lite
+journal qa-spec deck_spec.json --mode full
 journal run build_deck deck_spec.json --out outputs/presentation.pptx
-journal qa outputs/presentation.pptx --spec deck_spec.json --mode lite
+journal qa outputs/presentation.pptx --spec deck_spec.json --mode full
 journal render outputs/presentation.pptx --preview
 ```
 
@@ -48,30 +48,19 @@ If required Python packages are missing, ask the user to run
 must not prevent generating the editable `.pptx`; explain which optional PDF
 export or preview step could not run.
 
-## Choose the right mode
+## Produce a complete teaching deck
 
-- `lite`: 8-16 slides. Use this when the user asks for a short practice deck,
-  limited Codex usage, a free-plan exercise, a quick demonstration, or an
-  introductory classroom activity. Read only this file and the specific schema
-  or reference needed for the current task. Do not load the large full-workflow
-  reference automatically.
-- `full`: 40-55 slides. Use this when the user asks for a complete journal club,
-  a full teaching deck, the original v0.2.38 quality, comprehensive figure and
-  table coverage, or detailed speaker notes. Before planning the complete deck,
-  read [the preserved full v0.2.38 workflow](references/full_workflow_v0.2.38.md).
-- If the user does not choose a mode, use `lite` for the synthetic classroom
-  demo and `full` for an actual journal article unless their request or usage
-  constraints clearly indicate otherwise.
-
-Mode changes only the slide budget and level of explanatory detail. Never relax
-language correctness, image safety, speaker notes, figure attribution, or the
-requirement to verify a generated PowerPoint.
+`full` is the only supported presentation mode and always produces 40-55
+slides. Before planning the deck, read
+[the preserved full v0.2.38 workflow](references/full_workflow_v0.2.38.md).
+Preserve language correctness, image safety, speaker notes, figure attribution,
+and the requirement to verify the generated PowerPoint.
 
 ## Workflow
 
 1. Identify the current PDF. Resolve relative paths from the repository root;
    do not modify the source PDF. Initialize a collision-safe run with
-   `journal prepare "paper.pdf" --mode lite --json` or `--mode full`.
+   `journal prepare "paper.pdf" --mode full --json`.
 2. Read the extracted paper, page renders, manifest, contact sheet, and crop
    review. `prepare` also compares every embedded image with its PDF-rendered
    appearance and records unsafe inverted streams in `polarity-report.json`.
@@ -89,8 +78,7 @@ requirement to verify a generated PowerPoint.
 4. Map each paper Figure to exactly one presentation figure slide. Recompose
    labeled multi-panel figures before placing them in the deck. A tall table may
    be split into clearly labeled table parts when the content would otherwise
-   become unreadable. In `lite`, select the most instructive figures and explain
-   any omissions in the run manifest.
+   become unreadable. Explain any unavoidable omissions in the run manifest.
 5. Write a fresh `deck_spec.json`. Use
    [the bundled deck schema](references/deck_spec_schema.md) when needed. Keep
    every visible slide field in English. Write scan-friendly Traditional Chinese
@@ -98,11 +86,11 @@ requirement to verify a generated PowerPoint.
    article-specific explanations. Use the original bundled logo and visual
    style unless the user supplies an authorized replacement.
 6. Run the upstream asset audit and then
-   `journal qa-spec <deck_spec.json> --mode <lite|full>` BEFORE building. This
+   `journal qa-spec <deck_spec.json> --mode full` BEFORE building. This
    checks source metadata, required sections, English-only visible text, Chinese
    notes, figure uniqueness, panel geometry, table safety, and image polarity.
 7. Build the `.pptx`, then run
-   `journal qa <pptx> --spec <deck_spec.json> --mode <lite|full>`. Fix each
+   `journal qa <pptx> --spec <deck_spec.json> --mode full`. Fix each
    failure and rerun both gates until they pass. Export PDF and previews with
    `journal render <pptx> --preview` when the required tools are available.
 8. Report the actual saved files, slide count, QA result, and any omitted

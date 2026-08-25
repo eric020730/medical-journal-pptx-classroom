@@ -43,8 +43,8 @@ bash setup-macos.command
 ```text
 $medical-journal-to-pptx-classroom
 
-使用 lite 模式，把 sample-papers/classroom-demo-paper.pdf 製作成
-8–16 張英文投影片，所有講者備註使用繁體中文。
+使用 full 模式，把 sample-papers/classroom-demo-paper.pdf 製作成
+40–55 張英文投影片，所有講者備註使用繁體中文。
 完成 QA 後將檔案放到 outputs。
 ```
 

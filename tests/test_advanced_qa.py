@@ -271,13 +271,14 @@ class AdvancedSpecificationTests(unittest.TestCase):
         self.assertTrue(report["ok"], msg=str(report))
         self.assertEqual(report["slides"], 40)
 
-    def test_lite_mode_keeps_short_deck_without_full_only_sections(self) -> None:
+    def test_full_mode_rejects_short_deck_without_required_sections(self) -> None:
         slides = self.spec["slides"]
         assert isinstance(slides, list)
         self.spec["slides"] = [slides[0], *slides[3:9], slides[-1]]
-        report = qa_check.validate_specification(write_spec(self.root, self.spec), mode="lite")
-        self.assertTrue(report["ok"], msg=str(report))
+        report = qa_check.validate_specification(write_spec(self.root, self.spec), mode="full")
+        self.assertFalse(report["ok"], msg=str(report))
         self.assertEqual(report["slides"], 8)
+        self.assertTrue(any("expects 40-55 slides" in failure for failure in report["failures"]))
 
     def test_full_deck_requires_outline_and_references(self) -> None:
         slides = self.spec["slides"]

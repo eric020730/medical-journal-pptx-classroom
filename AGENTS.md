@@ -13,8 +13,8 @@ username, Desktop path, Google Drive path, or an environment from another copy.
 - Save final `.pptx` and optional `.pdf` files directly in `outputs/`.
 - Keep extraction assets, manifests, deck specs, QA reports, and previews in
   `.skill-work/<run-id>/`; never publish these files.
-- `lite` means 8-16 slides. `full` means the complete 40-55 slide workflow.
-  Preserve English slide text and Traditional Chinese notes.
+- `full` is the only presentation mode and means the complete 40-55 slide
+  workflow. Preserve English slide text and Traditional Chinese notes.
 - Do not silently overwrite an existing presentation.
 - Treat student papers and clinical material as private. Never upload, commit,
   publish, or share a PDF, patient data, generated deck, or credentials unless
