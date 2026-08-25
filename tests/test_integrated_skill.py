@@ -269,7 +269,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
                 rejected = invoke(*command)
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertIn("invalid choice: 'lite'", rejected.stderr)
-                self.assertIn("choose from full", rejected.stderr)
+                self.assertIn("{full}", rejected.stderr)
 
     def check_native_panel_labels(self, style: str) -> None:
         with tempfile.TemporaryDirectory() as temporary:
