@@ -462,6 +462,14 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
         self.check_preserved_embedded_panel_labels("nice")
 
     def check_emf_vector_table(self, style: str) -> None:
+        doctor = invoke(SKILL_RUNNER, "doctor", "--json")
+        self.assertEqual(doctor.returncode, 0, msg=doctor.stderr or doctor.stdout)
+        checks = json.loads(doctor.stdout).get("checks", [])
+        if not any(
+            check.get("label") == "LibreOffice" and check.get("status") == "ok"
+            for check in checks
+        ):
+            self.skipTest("LibreOffice is not installed on this test host")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             manifest, _, _ = create_synthetic_inversion_fixture(root)
