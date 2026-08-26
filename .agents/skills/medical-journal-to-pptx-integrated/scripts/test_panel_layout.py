@@ -139,6 +139,21 @@ class PanelLayoutTests(unittest.TestCase):
         self.assertEqual(cleaned.size, (118, 95))
         self.assertEqual(cleaned.getpixel((0, 0)), (8, 8, 8))
 
+    def test_single_pdf_boundary_column_is_removed_before_long_dark_canvas(self) -> None:
+        for boundary in ((255, 255, 255), (177, 175, 176), (164, 162, 163)):
+            with self.subTest(boundary=boundary):
+                image = Image.new("RGB", (120, 100), (34, 30, 31))
+                ImageDraw.Draw(image).line((119, 0, 119, 99), fill=boundary)
+
+                cleaned, edges = clean_panel_edges(image, max_edge_px=4)
+
+                self.assertEqual(
+                    edges,
+                    {"top": 0, "bottom": 0, "left": 0, "right": 1},
+                )
+                self.assertEqual(cleaned.size, (119, 100))
+                self.assertEqual(cleaned.getpixel((118, 50)), (34, 30, 31))
+
     def test_light_image_region_thicker_than_budget_is_not_cropped(self) -> None:
         image = Image.new("RGB", (120, 100), (7, 7, 7))
         ImageDraw.Draw(image).rectangle((0, 0, 119, 11), fill=(245, 245, 245))
@@ -156,6 +171,15 @@ class PanelLayoutTests(unittest.TestCase):
         cleaned, edges = clean_panel_edges(image, max_edge_px=4)
 
         self.assertEqual(edges, {"top": 0, "bottom": 0, "left": 0, "right": 0})
+        self.assertEqual(cleaned.tobytes(), image.tobytes())
+
+    def test_dark_frame_bordering_brighter_content_is_preserved(self) -> None:
+        image = Image.new("RGB", (120, 100), (145, 145, 145))
+        ImageDraw.Draw(image).rectangle((0, 0, 2, 99), fill=(18, 18, 18))
+
+        cleaned, edges = clean_panel_edges(image, max_edge_px=4)
+
+        self.assertEqual(edges["left"], 0)
         self.assertEqual(cleaned.tobytes(), image.tobytes())
 
     def test_colored_clinical_scale_at_image_edge_is_never_classified_as_rim(self) -> None:

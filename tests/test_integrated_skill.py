@@ -74,7 +74,7 @@ class IntegratedSkillStructureTests(unittest.TestCase):
         self.assertIn("--mode full", content)
         self.assertEqual(
             (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
-            "v4.0.0",
+            "v4.0.1",
         )
 
     def test_skill_preserves_all_image_building_and_quality_helpers(self) -> None:

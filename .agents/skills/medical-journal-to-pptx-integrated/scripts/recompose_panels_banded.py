@@ -142,8 +142,14 @@ def edge_line(array, side, depth):
     return array[:, -depth - 1, :]
 
 
-def is_disposable_rim(line):
-    """Classify an achromatic near-white/gray seam, never a colorful scale bar."""
+def is_disposable_rim(line, inner_line=None):
+    """Classify a thin achromatic seam without consuming dark image canvas.
+
+    PDF image-object renders often add one full-edge white or mid-gray column
+    before a long, uniform mammography background.  Dark canvas must stop the
+    trim sequence; otherwise the bounded safety check sees more than its
+    inspection budget and conservatively leaves the true outer seam in place.
+    """
     values = line.astype(np.int16)
     luminance = values.mean(axis=1)
     saturation = values.max(axis=1) - values.min(axis=1)
@@ -159,9 +165,26 @@ def is_disposable_rim(line):
 
     if near_white >= 0.70:
         return True
-    if dominant_fraction >= 0.50 and dominant_luminance >= 30:
+    if dominant_fraction >= 0.50 and dominant_luminance >= 70:
         return True
-    return float(luminance.std()) <= 32 and float(luminance.mean()) >= 70
+    if float(luminance.std()) <= 32 and float(luminance.mean()) >= 70:
+        return True
+
+    # Preserve uniformly dark clinical canvas, but allow a low-luminance
+    # antialiased hairline when it is demonstrably brighter than the next line
+    # inward.  The one-way contrast check also preserves meaningful dark frames
+    # bordering brighter anatomy.
+    if inner_line is None:
+        return False
+    inner = inner_line.astype(np.int16)
+    inner_saturation = inner.max(axis=1) - inner.min(axis=1)
+    if float(np.mean(inner_saturation > 24)) > 0.20:
+        return False
+    return (
+        float(luminance.mean()) >= 40
+        and float(luminance.std()) <= 16
+        and float(luminance.mean() - inner.mean(axis=1).mean()) >= 32
+    )
 
 
 def clean_panel_edges(image, max_edge_px=4):
@@ -177,7 +200,10 @@ def clean_panel_edges(image, max_edge_px=4):
     for side in trim_px:
         depth_limit = min(max_edge_px, (height if side in ("top", "bottom") else width) - 2)
         removable = 0
-        while removable <= depth_limit and is_disposable_rim(edge_line(pixels, side, removable)):
+        while removable <= depth_limit and is_disposable_rim(
+            edge_line(pixels, side, removable),
+            edge_line(pixels, side, removable + 1),
+        ):
             removable += 1
 
         # A bright/gray region extending beyond the inspection budget could be

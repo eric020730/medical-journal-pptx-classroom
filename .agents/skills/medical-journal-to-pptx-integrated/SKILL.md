@@ -54,7 +54,10 @@ language rules, and final QA.
    margin. Reconcile source-row seams that split verified boxed embedded labels;
    never move a seam through a colored clinical scale. Remove only confirmed
    thin white/gray rims from single or multipanel raster figures, at most four
-   pixels per side by default. Automatically compare horizontal and multi-row
+   pixels per side by default. A full-edge PDF-render hairline remains removable
+   when it is followed by uniform dark image canvas; that dark canvas terminates
+   the trim sequence and must not consume the inspection budget. Automatically
+   compare horizontal and multi-row
    arrangements against the selected slide box, panel aspect ratios, gutters,
    and label bands; choose the arrangement that maximizes readability of the
    smallest displayed panel. Protect anatomy, annotations, flowcharts, table

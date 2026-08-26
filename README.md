@@ -2,14 +2,14 @@
 
 把一篇醫學期刊 PDF 交給 Codex，產生可編輯的 PowerPoint：**英文投影片、繁體中文講者備註、論文 Figures／Tables，以及自動品質檢查**。
 
-本專案提供兩種互相獨立的入口：classroom repository skill，以及 `v4.0.0` **可全域安裝、可在任何專案啟用的整合版 skill**。整合版固定使用 40–55 張的 full 模式，支援 standard／nice 視覺風格、建檔前後雙階段 QA、PDF 灰階反相檢查與完整影像來源追蹤。
+本專案提供兩種互相獨立的入口：classroom repository skill，以及 `v4.0.1` **可全域安裝、可在任何專案啟用的整合版 skill**。整合版固定使用 40–55 張的 full 模式，支援 standard／nice 視覺風格、建檔前後雙階段 QA、PDF 灰階反相檢查與完整影像來源追蹤。
 
 > 這不是無需 AI 帳號的離線產生器。Python 腳本負責讀取 PDF、處理圖片、組裝與驗證 PowerPoint；理解論文、撰寫英文投影片及繁體中文講稿，仍需要可使用 Codex 的帳號。
 
 ## 推薦：安裝可在任何專案使用的全域整合版
 
 從 [最新 GitHub release](https://github.com/eric020730/medical-journal-pptx-classroom/releases/latest)
-下載 `medical-journal-to-pptx-integrated-v4.0.0.zip` 和 `.sha256`，驗證後完整解壓縮。
+下載 `medical-journal-to-pptx-integrated-v4.0.1.zip` 和 `.sha256`，驗證後完整解壓縮。
 
 macOS / Linux：
 
@@ -172,7 +172,7 @@ medical-journal-pptx-classroom/
 │   └── assets/                          簡報 Logo 等資源
 ├── .agents/skills/medical-journal-to-pptx-integrated/
 │   ├── SKILL.md                         全域整合版簡潔入口
-│   ├── VERSION                          v4.0.0
+│   ├── VERSION                          v4.0.1
 │   ├── scripts/                         雙視覺 builder、雙階段 QA、polarity
 │   └── references/                      完整流程、兩種風格、QA 來源鏈
 ├── docs/                                詳細安裝、教學與疑難排解

@@ -46,9 +46,11 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       instead of silently covering anatomy, annotations, or clinical overlays.
 - [x] White, gray, and anti-aliased achromatic edge seams are trimmed by at most
       four pixels per side by default for both standalone raster figures and
-      recomposed panels; dark borders, colored scales, bright edge-touching
-      content, tables, flowcharts, and thicker ambiguous light regions are
-      preserved.
+      recomposed panels. A uniform dark clinical canvas stops the trim sequence,
+      so a preceding one-pixel PDF object-boundary hairline is removed instead
+      of being retained by the safety cap; dark borders facing brighter content,
+      colored scales, bright edge-touching content, tables, flowcharts, and
+      thicker ambiguous light regions are preserved.
 - [x] Exact crops sharing an audited source automatically reconcile a rough row
       boundary only when it cuts a verified boxed embedded label; independent
       overlap groups remain separate, linked panels share one corrected seam,
