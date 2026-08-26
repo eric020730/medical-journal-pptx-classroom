@@ -527,54 +527,56 @@ def _embed_manifest_part(pptx_path: Path, manifest: dict[str, Any]) -> None:
     manifest_xml, _ = _manifest_xml(manifest)
     rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
     ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
-    with zipfile.ZipFile(pptx_path, "r") as source:
-        rels = ET.fromstring(source.read("_rels/.rels"))
-        for relation in list(rels):
-            if relation.get("Type") == MANIFEST_REL_TYPE:
-                rels.remove(relation)
-        used_ids = {relation.get("Id") for relation in rels}
-        number = 1
-        while f"rIdMJ{number}" in used_ids:
-            number += 1
-        ET.SubElement(
-            rels,
-            f"{{{rel_ns}}}Relationship",
-            {
-                "Id": f"rIdMJ{number}",
-                "Type": MANIFEST_REL_TYPE,
-                "Target": MANIFEST_PART,
-            },
-        )
+    temporary: Path | None = None
+    try:
+        with zipfile.ZipFile(pptx_path, "r") as source:
+            rels = ET.fromstring(source.read("_rels/.rels"))
+            for relation in list(rels):
+                if relation.get("Type") == MANIFEST_REL_TYPE:
+                    rels.remove(relation)
+            used_ids = {relation.get("Id") for relation in rels}
+            number = 1
+            while f"rIdMJ{number}" in used_ids:
+                number += 1
+            ET.SubElement(
+                rels,
+                f"{{{rel_ns}}}Relationship",
+                {
+                    "Id": f"rIdMJ{number}",
+                    "Type": MANIFEST_REL_TYPE,
+                    "Target": MANIFEST_PART,
+                },
+            )
 
-        content_types = ET.fromstring(source.read("[Content_Types].xml"))
-        for override in list(content_types):
-            if override.get("PartName") == f"/{MANIFEST_PART}":
-                content_types.remove(override)
-        ET.SubElement(
-            content_types,
-            f"{{{ct_ns}}}Override",
-            {
-                "PartName": f"/{MANIFEST_PART}",
-                "ContentType": MANIFEST_CONTENT_TYPE,
-            },
-        )
-        # LibreOffice requires the conventional default namespaces in these
-        # two package-root parts; semantically equivalent ``ns0:`` output is
-        # rejected as an unloadable source file.
-        ET.register_namespace("", rel_ns)
-        relationships_xml = ET.tostring(
-            rels, encoding="utf-8", xml_declaration=True
-        )
-        ET.register_namespace("", ct_ns)
-        content_types_xml = ET.tostring(
-            content_types, encoding="utf-8", xml_declaration=True
-        )
+            content_types = ET.fromstring(source.read("[Content_Types].xml"))
+            for override in list(content_types):
+                if override.get("PartName") == f"/{MANIFEST_PART}":
+                    content_types.remove(override)
+            ET.SubElement(
+                content_types,
+                f"{{{ct_ns}}}Override",
+                {
+                    "PartName": f"/{MANIFEST_PART}",
+                    "ContentType": MANIFEST_CONTENT_TYPE,
+                },
+            )
+            # LibreOffice requires the conventional default namespaces in these
+            # two package-root parts; semantically equivalent ``ns0:`` output is
+            # rejected as an unloadable source file.
+            ET.register_namespace("", rel_ns)
+            relationships_xml = ET.tostring(
+                rels, encoding="utf-8", xml_declaration=True
+            )
+            ET.register_namespace("", ct_ns)
+            content_types_xml = ET.tostring(
+                content_types, encoding="utf-8", xml_declaration=True
+            )
 
-        with tempfile.NamedTemporaryFile(
-            prefix=f".{pptx_path.name}.", suffix=".tmp", dir=pptx_path.parent, delete=False
-        ) as handle:
-            temporary = Path(handle.name)
-        try:
+            with tempfile.NamedTemporaryFile(
+                prefix=f".{pptx_path.name}.", suffix=".tmp",
+                dir=pptx_path.parent, delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
             with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as target:
                 for item in source.infolist():
                     if item.filename in {"_rels/.rels", "[Content_Types].xml", MANIFEST_PART}:
@@ -589,10 +591,13 @@ def _embed_manifest_part(pptx_path: Path, manifest: dict[str, Any]) -> None:
                     content_types_xml,
                 )
                 target.writestr(MANIFEST_PART, manifest_xml)
-            os.replace(temporary, pptx_path)
-        finally:
-            if temporary.exists():
-                temporary.unlink()
+        # Windows forbids replacing an archive while its source handle remains
+        # open, so perform the atomic swap only after leaving the ZipFile block.
+        assert temporary is not None
+        os.replace(temporary, pptx_path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def validate_manifest_wiring(pptx_path: Path) -> str | None:

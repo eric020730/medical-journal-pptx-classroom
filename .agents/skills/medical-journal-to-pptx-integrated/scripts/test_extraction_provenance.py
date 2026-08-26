@@ -8,6 +8,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 import json
 import hashlib
+import os
 import subprocess
 import sys
 import tempfile
@@ -584,6 +585,37 @@ class ExtractionTests(unittest.TestCase):
             extract_from_pdf.extract(str(pdf), str(output), dpi=72, table_dpi=72)
 
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+
+    def test_cli_summary_is_safe_under_windows_cp1252_stdout(self) -> None:
+        pdf = self.root / "paper.pdf"
+        self._simple_pdf(pdf)
+        output = self.root / "輸出"
+        environment = dict(os.environ)
+        environment["PYTHONUTF8"] = "0"
+        environment["PYTHONIOENCODING"] = "cp1252:strict"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).with_name("extract_from_pdf.py")),
+                str(pdf),
+                "--out", str(output),
+                "--dpi", "72",
+                "--table-dpi", "72",
+                "--no-contact-sheet",
+            ],
+            env=environment,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(
+            result.returncode,
+            0,
+            result.stderr.decode("cp1252", errors="replace"),
+        )
+        self.assertIn(b"embedded images ->", result.stdout)
+        self.assertIn(b"\\u8f38\\u51fa", result.stdout)
 
     def test_existing_manifest_never_authorizes_cleanup(self) -> None:
         pdf = self.root / "paper.pdf"

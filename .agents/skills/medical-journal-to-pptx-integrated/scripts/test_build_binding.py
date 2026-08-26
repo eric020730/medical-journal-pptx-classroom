@@ -745,6 +745,37 @@ class BuildBindingTests(unittest.TestCase):
 
         self.assertEqual(destination.read_bytes(), b"previous verified deck")
 
+    def test_manifest_replace_waits_until_source_archive_is_closed(self) -> None:
+        deck = self.root / "manifest-source.pptx"
+        Presentation().save(deck)
+        manifest = {"schema": build_deck.MANIFEST_SCHEMA, "test": "windows-lock"}
+        real_zip_file = zipfile.ZipFile
+        real_replace = build_deck.os.replace
+        source_archives: list[zipfile.ZipFile] = []
+
+        def tracked_zip_file(
+            file: object, mode: str = "r", *args: object, **kwargs: object
+        ) -> zipfile.ZipFile:
+            archive = real_zip_file(file, mode, *args, **kwargs)
+            if Path(file) == deck and mode == "r":
+                source_archives.append(archive)
+            return archive
+
+        def checked_replace(source: object, destination: object) -> None:
+            self.assertEqual(len(source_archives), 1)
+            self.assertIsNone(
+                source_archives[0].fp,
+                "Windows cannot replace a PPTX while its source ZipFile is open",
+            )
+            real_replace(source, destination)
+
+        with mock.patch.object(
+            build_deck.zipfile, "ZipFile", side_effect=tracked_zip_file
+        ), mock.patch.object(build_deck.os, "replace", side_effect=checked_replace):
+            build_deck._embed_manifest_part(deck, manifest)
+
+        self.assertIsNone(build_deck.validate_manifest_wiring(deck))
+
     def test_native_label_stamping_preserves_build_manifest_binding(self) -> None:
         image = self.root / "manifest-panels.png"
         Image.new("RGB", (600, 300), (30, 30, 30)).save(image)

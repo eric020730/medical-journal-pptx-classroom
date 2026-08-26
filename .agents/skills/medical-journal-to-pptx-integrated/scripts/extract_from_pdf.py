@@ -42,6 +42,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 import re
 
@@ -1271,6 +1272,11 @@ def build_crop_review_artifacts(
 
 
 def main():
+    reconfigure_stdout = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure_stdout):
+        # Windows pipes commonly inherit a legacy code page. Preserve a usable
+        # CLI even when an output path or a future summary contains Unicode.
+        reconfigure_stdout(errors="backslashreplace")
     ap = argparse.ArgumentParser()
     ap.add_argument("pdf", help="Path to the source PDF")
     ap.add_argument("--out", required=True, help="Output directory")
@@ -1308,7 +1314,7 @@ def main():
             encoding="utf-8",
         )
     print(f"Extracted {manifest['page_count']} pages, "
-          f"{len(manifest['images'])} embedded images → {args.out}")
+          f"{len(manifest['images'])} embedded images -> {args.out}")
     print(f"Filtered figures: {len(manifest['figures'])}; "
           f"unique figures: {len(manifest['unique_figures'])}; "
           f"ignored small images: {len(manifest['ignored_images'])}; "
