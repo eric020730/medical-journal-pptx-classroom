@@ -13,6 +13,13 @@ from PIL import Image, ImageDraw, ImageOps
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SKILL_SCRIPTS = (
+    PROJECT_ROOT
+    / ".agents"
+    / "skills"
+    / "medical-journal-to-pptx-integrated"
+    / "scripts"
+)
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 
 import classroom  # noqa: E402
@@ -33,8 +40,59 @@ def write_asset(root: Path, name: str, *, width: int = 220, **sidecar: object) -
     directory = root / "final_assets"
     directory.mkdir(exist_ok=True)
     path = directory / name
+
+    source = sidecar.pop("source", None)
+    source_inputs = sidecar.pop("source_inputs", None)
+    asset_type = str(sidecar.get("asset_type", "figure"))
+    margin = int(sidecar.get("margin", 16))
+    if isinstance(source, str) and Path(source).suffix.lower() != ".pdf":
+        command = [
+            sys.executable,
+            str(SKILL_SCRIPTS / "postprocess_assets.py"),
+            "trim",
+            source,
+            str(path),
+            "--margin",
+            str(margin),
+            "--asset-type",
+            asset_type,
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or result.stdout)
+        metadata_path = path.with_suffix(path.suffix + ".postprocess.json")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata.update(sidecar)
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+        return path
+    if isinstance(source_inputs, list) and source_inputs:
+        if len(source_inputs) == 1:
+            return write_asset(root, name, width=width, source=source_inputs[0], **sidecar)
+        command = [
+            sys.executable,
+            str(SKILL_SCRIPTS / "postprocess_assets.py"),
+            "recompose-panels",
+            str(path),
+            "--inputs",
+            *(str(value) for value in source_inputs),
+            "--margin",
+            str(margin),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or result.stdout)
+        metadata_path = path.with_suffix(path.suffix + ".postprocess.json")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata.update(sidecar)
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+        return path
+
     patterned_image().resize((width, 180)).save(path)
     metadata = {"command": "trim", "asset_type": "figure", **sidecar}
+    if source is not None:
+        metadata["source"] = source
+    if source_inputs is not None:
+        metadata["source_inputs"] = source_inputs
     path.with_suffix(path.suffix + ".postprocess.json").write_text(
         json.dumps(metadata, ensure_ascii=False), encoding="utf-8"
     )
@@ -42,48 +100,88 @@ def write_asset(root: Path, name: str, *, width: int = 220, **sidecar: object) -
 
 
 def full_spec() -> dict[str, object]:
+    shared_note = (
+        "📌 這張投影片提供完整教學重點，協助理解研究內容與臨床判斷，"
+        "並連結後續討論。"
+    )
     slides: list[dict[str, object]] = [
         {
             "type": "title",
             "title": "Synthetic Medical Study",
-            "authors": "Education Team",
-            "citation": "Synthetic Journal, 2026",
-            "notes": "📚 這是虛構教學論文。",
+            "authors": "Author A, Author B, et al.",
+            "citation": "Synthetic Journal 2026;1:1-10",
+            "notes": shared_note + " 本頁介紹研究標題、作者資訊與期刊來源。",
         },
         {
             "type": "outline",
             "title": "Learning Outline",
-            "items": ["1️⃣ Study design — Slides 3–20", "2️⃣ Results — Slides 21–39"],
-            "notes": "🧭 本頁說明研究架構。",
+            "items": [
+                "1️⃣ Background — Slides 3–10",
+                "2️⃣ Methods — Slides 11–20",
+                "3️⃣ Results — Slides 21–38",
+            ],
+            "notes": shared_note + " 本頁依序預告背景、方法與結果三個教學區段。",
         },
         {
             "type": "part",
             "number": 1,
             "title": "Study Design",
-            "notes": "🔎 本段介紹研究設計。",
+            "notes": shared_note + " 本頁開啟研究設計段落並提示接下來的判讀方向。",
         },
     ]
-    slides.extend(
-        {
-            "type": "content",
-            "title": f"Teaching Point {index}",
-            "body": ["Clinical context:", "Synthetic research findings", "→ Teaching takeaway"],
-            "notes": "💡 此頁為繁體中文教學講稿。",
-        }
-        for index in range(1, 36)
-    )
+    teaching_topics = [
+        "研究問題界定", "疾病負擔評估", "既有治療缺口", "研究假說形成",
+        "試驗設計選擇", "收案族群界定", "納入條件判讀", "排除條件判讀",
+        "介入措施細節", "對照策略合理性", "隨機分派流程", "盲法執行品質",
+        "主要終點定義", "次要終點定義", "樣本數估算", "統計模型選擇",
+        "缺失資料處理", "敏感度分析", "基線平衡判讀", "主要結果解讀",
+        "次要結果解讀", "效果量臨床意義", "信賴區間判讀", "亞組分析限制",
+        "不良事件比較", "依從性與交叉", "追蹤完整程度", "偏差風險評估",
+        "外部效度判讀", "證據確定性", "研究優勢整理", "研究限制整理",
+        "臨床決策轉譯", "共享決策應用", "未來研究方向",
+    ]
+    for index, topic in enumerate(teaching_topics, start=1):
+        slides.append(
+            {
+                "type": "content",
+                "title": f"Teaching Point {index}",
+                "body": [
+                    "Clinical context:",
+                    "• Synthetic evidence supports this teaching example",
+                    "✅ Clinical meaning remains explicit and actionable",
+                ],
+                "notes": (
+                    shared_note
+                    + f" 本頁聚焦{topic}，補充頁面專屬的證據判讀。"
+                    + " ✅ 臨床結論應結合研究限制審慎運用。"
+                ),
+            }
+        )
     slides.extend(
         [
             {
                 "type": "references",
                 "title": "References",
-                "items": ["Synthetic Journal, 2026"],
-                "notes": "📖 本頁列出參考資料。",
+                "items": [
+                    f"{number}. Author et al. Synthetic Journal 202{number};1:1-10."
+                    for number in range(1, 6)
+                ],
+                "notes": shared_note + " 本頁整理五筆參考來源與查核文獻的方法。",
             },
-            {"type": "thanks", "title": "Thank You", "notes": "🙏 感謝聆聽。"},
+            {
+                "type": "thanks",
+                "title": "Thank You",
+                "citation": "Author et al — Synthetic Journal 2026",
+                "notes": shared_note + " 本頁總結教學內容並邀請聽眾提出問題。",
+            },
         ]
     )
-    return {"meta": {"footer_label": "Synthetic Classroom"}, "slides": slides}
+    return {
+        "meta": {
+            "footer_label": "Author et al — Synthetic Journal 2026 | Synthetic topic"
+        },
+        "slides": slides,
+    }
 
 
 def write_spec(root: Path, spec: dict[str, object]) -> Path:
@@ -95,12 +193,19 @@ def write_spec(root: Path, spec: dict[str, object]) -> Path:
 def add_figure(
     spec: dict[str, object], asset: Path, *, caption: str = "Figure 1. Synthetic image.", **extra: object
 ) -> dict[str, object]:
+    notes = str(
+        extra.pop(
+            "notes",
+            "🖼️【圖片說明】此圖為虛構教學影像，呈現研究結果並協助連結臨床判讀。",
+        )
+    )
+    notes += " 本頁補充圖像來源、主要發現與解讀限制，提醒聽眾審慎應用。"
     slide: dict[str, object] = {
         "type": "figure",
         "title": "Research Findings",
         "image": f"final_assets/{asset.name}",
         "caption": caption,
-        "notes": "🖼️【圖片說明】此圖為虛構教學影像。",
+        "notes": notes,
         **extra,
     }
     slides = spec["slides"]
@@ -110,19 +215,12 @@ def add_figure(
 
 
 def create_synthetic_inversion_fixture(
-    root: Path, *, source_size: tuple[int, int] | None = None, source_format: str = "PNG"
+    root: Path, *, source_size: tuple[int, int] | None = None, source_format: str = "JPEG"
 ) -> tuple[Path, Path, Path]:
-    extracted = root / "extracted"
-    figure_directory = extracted / "figures"
-    figure_directory.mkdir(parents=True)
     source_pdf = root / "synthetic-inverted-image.pdf"
-    raw_path = extracted / "image_p01_01.png"
-    rendered_path = figure_directory / "Figure_01.png"
     source = patterned_image()
-    if source_size is not None:
-        source = source.resize(source_size)
+    source = source.resize(source_size or (280, 240))
     raw = ImageOps.invert(source)
-    raw.save(raw_path)
 
     stream = BytesIO()
     raw.save(stream, format=source_format)
@@ -134,20 +232,32 @@ def create_synthetic_inversion_fixture(
     document.save(source_pdf)
     document.close()
 
-    with pymupdf.open(source_pdf) as pdf:
-        pixmap = pdf[0].get_pixmap(matrix=pymupdf.Matrix(2, 2), clip=rectangle, alpha=False)
-        pixmap.save(rendered_path)
-
-    bbox = {"x0": 30, "y0": 30, "x1": 250, "y1": 210}
-    manifest = {
-        "pdf": str(source_pdf),
-        "images": [{"file": raw_path.name, "page": 1, "bbox_pt": bbox}],
-        "figures": [
-            {"source": raw_path.name, "page": 1, "file": "figures/Figure_01.png", "bbox_pt": bbox}
+    extracted = root / "extracted"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SKILL_SCRIPTS / "extract_from_pdf.py"),
+            str(source_pdf),
+            "--out",
+            str(extracted),
+            "--dpi",
+            "144",
+            "--table-dpi",
+            "144",
+            "--no-contact-sheet",
         ],
-    }
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout)
     path = extracted / "manifest.json"
-    path.write_text(json.dumps(manifest), encoding="utf-8")
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if not manifest["images"] or not manifest["figures"]:
+        raise RuntimeError("Synthetic Decode fixture did not yield an auditable figure.")
+    raw_path = extracted / manifest["images"][0]["file"]
+    rendered_path = extracted / manifest["figures"][0]["file"]
     return path, raw_path, rendered_path
 
 
@@ -199,7 +309,11 @@ class ImagePolarityTests(unittest.TestCase):
             add_figure(spec, asset)
             result = image_polarity.audit_final_assets(write_spec(root, spec), report)
             self.assertFalse(result["ok"])
-            self.assertIn("inverted raw PDF image", result["failures"][0])
+            self.assertTrue(any(
+                "inverted raw PDF image" in failure
+                or "reverses the grayscale" in failure
+                for failure in result["failures"]
+            ))
 
     def test_composite_asset_cannot_hide_inverted_panel_input(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

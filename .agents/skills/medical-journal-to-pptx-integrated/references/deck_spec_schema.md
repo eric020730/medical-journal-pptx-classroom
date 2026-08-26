@@ -178,7 +178,12 @@ other image content, preserve those embedded letters; never erase, cover,
 inpaint, or crop clinical pixels to obtain editable labels. In that case omit
 `panel_labels` from the slide, and keep `source_label_policy: preserve`,
 `native_labels: false`, and `embedded_labels: ["A", "B", ...]` in the image
-sidecar. Never combine preserved embedded labels with a second native set.
+sidecar. When a figure mixes embedded and exterior labels, use
+`source_label_policy: mixed`, keep only the overlapping subset in
+`embedded_labels`, and put only safely cropped/absent letters in
+`native_label_values` and native-label geometry. Geometric source label/image
+boxes override stale placement flags. Never duplicate the same letter in both
+sets; native labels use the standard `#8FA8C8` blue-gray.
 Speaker notes must reference the same visible labels with `【A 圖】`,
 `【B 圖】`, etc.; QA reads either native or embedded label metadata.
 
@@ -193,7 +198,9 @@ Renders a bullet list of reference strings. Keep to 5-10.
   "items": [
     "1. Firstauthor A, et al. Journal Name 2026; 12(3):123-134.",
     "2. Priorstudy B, et al. Journal Name 2024; 10(2):45-56.",
-    "3. Guidelines Group C. Journal Name 2023; 9(1):1-12."
+    "3. Guidelines Group C. Journal Name 2023; 9(1):1-12.",
+    "4. Validationgroup D, et al. Journal Name 2022; 8(4):200-210.",
+    "5. Methodsconsortium E. Journal Name 2021; 7(2):80-92."
   ],
   "notes": "📖 本篇主要參考文獻..."
 }
@@ -226,9 +233,40 @@ Before running the builder, check:
       source letters when removal would damage image content.
 - [ ] Embedded-label figures omit slide `panel_labels` and record their labels
       in the image sidecar; no source image pixels are masked or inpainted.
-- [ ] Figure crops are tight to image content without excess white margins or
-      loss of semantic content.
+- [ ] Figure crops retain a conservatively trimmed core without semantic loss,
+      followed by the standard exact 16 px safety canvas in the verified image
+      background; there is no additional uncontrolled page whitespace.
 - [ ] No paper Figure number appears on more than one `figure` slide, and no
       slide `image` points at a raw per-panel crop (`*_panel_*` / `panel_a.png`);
       multi-panel figures are recomposed into a single image first.
-- [ ] Every `figure` slide has a valid `image` path
+- [ ] Every slide that declares `image` has a valid, decodable path. Every final
+      raster (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.webp`, or `.bmp`) has
+      a complete neighboring `.postprocess.json` sidecar and a recursive source
+      chain to a trusted PDF-rendered/page/vector source. This applies equally
+      to `content.image` and `figure.image`.
+- [ ] Every `.emf` is a vector table created by the bundled `vector-table`
+      helper and has a typed neighboring sidecar bound to the audited PDF hash,
+      authenticated page/bbox, padding, canonical SVG, and exact EMF replay.
+      Other non-raster slide-image formats are unsupported.
+- [ ] Final figure and flowchart rasters record an exact 16 px safety canvas;
+      final raster tables record an integer 8–24 px margin. Padded dimensions,
+      unpadded dimensions, background, and actual file dimensions agree.
+- [ ] Every `content` slide has a non-empty English `title` and a substantive
+      structured `body`; every `figure` has a non-empty `title`, `image`, and
+      `caption`.
+- [ ] Every slide has substantive Traditional Chinese notes, starts with a scan
+      marker/emoji, and content slides end with a takeaway marker. Figure notes
+      describe every visible panel exactly once.
+- [ ] The first slide is the only `title`, the last slide is the only `thanks`,
+      and at least one `outline`, `part`, and `references` slide exists.
+- [ ] `meta.footer_label` is non-empty English text in the documented format;
+      the references slide contains 5–10 non-empty entries; the closing slide
+      carries the article citation.
+- [ ] Panel geometry entries are finite, ordered values in `[0, 1]`, match the
+      number of native labels, and place each label inside the slide near the
+      corresponding figure.
+- [ ] Run prebuild QA, build, stamp native labels when required, and run final QA
+      with the same canonical spec and selected style. Final QA verifies the
+      embedded build manifest, spec hash, style, per-slide content, notes, logo,
+      and image hashes; a deck built from another spec is never reusable merely
+      because it has the same slide count.

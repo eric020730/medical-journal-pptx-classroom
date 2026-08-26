@@ -113,7 +113,7 @@ def crop(pg, box, dpi, margin, out_path):
                      box[2] + margin, box[3] + margin)
     pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), clip=clip)
     pix.save(out_path)
-    return pix.width, pix.height
+    return pix.width, pix.height, [clip.x0, clip.y0, clip.x1, clip.y1]
 
 
 def _content_bbox_excluding_frame(pg, frame, frac=0.95):
@@ -188,7 +188,7 @@ def crop_inside_frame(pg, box, dpi, inset, white_margin, out_path,
                        (255, 255, 255))
     canvas.paste(im, (white_margin, white_margin))
     canvas.save(out_path)
-    return canvas.size
+    return canvas.size[0], canvas.size[1], [clip.x0, clip.y0, clip.x1, clip.y1]
 
 
 def main():
@@ -212,7 +212,12 @@ def main():
     ap.add_argument("--frame-inset", type=float, default=3.0,
                     help="PDF points to inset from the detected frame so the "
                          "frame stroke + halo are excluded (default 3).")
+    ap.add_argument("--safety-margin-px", type=int, default=16,
+                    help="Exact final white safety canvas in pixels (must be 16).")
     a = ap.parse_args()
+
+    if a.safety_margin_px != 16:
+        ap.error("final flowchart assets require --safety-margin-px 16")
 
     doc = fitz.open(a.pdf)
     pg = doc[a.page - 1]
@@ -228,15 +233,35 @@ def main():
     if not a.output:
         print("error: output path required when cropping", file=sys.stderr)
         sys.exit(1)
+    pdf_path = Path(a.pdf).expanduser().resolve(strict=True)
+    output = Path(a.output).expanduser().resolve(strict=False)
+    if pdf_path == output:
+        ap.error("PDF input and raster output must be different paths")
     if a.strip_outer_frame:
-        w, h = crop_inside_frame(pg, info["bbox"], a.dpi, a.frame_inset,
-                                 a.white_margin, a.output)
+        w, h, effective_bbox = crop_inside_frame(
+            pg, info["bbox"], a.dpi, a.frame_inset, a.white_margin, a.output
+        )
         info["outer_frame_stripped"] = True
         info["white_margin_px"] = a.white_margin
         info["frame_inset_pt"] = a.frame_inset
     else:
-        w, h = crop(pg, info["bbox"], a.dpi, a.margin, a.output)
-    output = Path(a.output).expanduser().resolve()
+        w, h, effective_bbox = crop(pg, info["bbox"], a.dpi, a.margin, a.output)
+    from PIL import Image
+
+    with Image.open(output) as rendered:
+        core = rendered.convert("RGB")
+    unpadded_size = [core.width, core.height]
+    final = Image.new(
+        "RGB",
+        (
+            core.width + 2 * a.safety_margin_px,
+            core.height + 2 * a.safety_margin_px,
+        ),
+        (255, 255, 255),
+    )
+    final.paste(core, (a.safety_margin_px, a.safety_margin_px))
+    final.save(output)
+    w, h = final.size
     output.with_suffix(output.suffix + ".postprocess.json").write_text(
         json.dumps(
             {
@@ -245,6 +270,18 @@ def main():
                 "source": str(Path(a.pdf).expanduser().resolve()),
                 "page": a.page,
                 "dpi": a.dpi,
+                "detected_bbox_pt": info["bbox"],
+                "effective_bbox_pt": [float(value) for value in effective_bbox],
+                "pdf_crop_margin_pt": a.margin,
+                "outer_frame_stripped": bool(a.strip_outer_frame),
+                "white_margin_px": a.white_margin if a.strip_outer_frame else 0,
+                "frame_inset_pt": a.frame_inset if a.strip_outer_frame else 0,
+                "margin": a.safety_margin_px,
+                "safety_margin_px": a.safety_margin_px,
+                "padding_background": [255, 255, 255],
+                "unpadded_size_px": unpadded_size,
+                "padded_size_px": [w, h],
+                "intermediate": False,
             },
             ensure_ascii=False,
             indent=2,

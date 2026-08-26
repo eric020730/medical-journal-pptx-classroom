@@ -20,10 +20,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-import build_deck
-import image_polarity
-import qa_gate
-
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 SKILL_NAME = "medical-journal-to-pptx-integrated"
@@ -167,6 +163,8 @@ def allocate_output(source: Path, directory: Path, *, mode: str, style: str) -> 
 def initialize_run(
     source: Path, *, workspace: Path, output_dir: Path, mode: str, style: str
 ) -> dict[str, Any]:
+    import build_deck
+
     workspace = workspace.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -271,10 +269,15 @@ def resolve_script(name: str) -> Path:
     return script
 
 
-def render_presentation(pptx: Path) -> dict[str, Any]:
+def render_presentation(pptx: Path, *, overwrite: bool = False) -> dict[str, Any]:
     presentation = pptx.expanduser().resolve()
     if not presentation.is_file():
         raise FileNotFoundError(f"PowerPoint file not found: {presentation}")
+    output = presentation.with_suffix(".pdf")
+    if output.exists() and not overwrite:
+        raise FileExistsError(
+            f"Refusing to overwrite existing PDF: {output}. Pass --overwrite to replace it."
+        )
     soffice = find_binary("soffice")
     if soffice is None:
         raise RuntimeError("LibreOffice is unavailable; the verified editable PPTX remains usable.")
@@ -284,7 +287,6 @@ def render_presentation(pptx: Path) -> dict[str, Any]:
             str(soffice), f"-env:UserInstallation={profile}", "--headless", "--convert-to",
             "pdf", "--outdir", str(presentation.parent), str(presentation),
         ], capture=True)
-    output = presentation.with_suffix(".pdf")
     if not output.is_file():
         raise RuntimeError(f"LibreOffice did not create the expected PDF: {output}")
     return {"pptx": str(presentation), "pdf": str(output)}
@@ -299,35 +301,69 @@ def _synthetic_spec(asset: Path, *, mode: str, manifest: Path) -> dict[str, Any]
     }]
     slides.append({
         "type": "outline", "title": "Learning Outline",
-        "items": ["1️⃣ Study design — Slides 3–20", "2️⃣ Results — Slides 21–39"],
-        "notes": "🧭 本頁以繁體中文說明完整教學架構。",
+        "items": [
+            "1️⃣ Study design — Slides 3–20",
+            "2️⃣ Results — Slides 21–37",
+            "3️⃣ Figure interpretation and references — Slides 38–39",
+        ],
+        "notes": "🧭 本頁以繁體中文說明完整教學架構，並提示研究設計、主要結果與臨床應用。",
     })
     slides.append({
         "type": "part", "number": 1, "title": "Study Design",
         "notes": "🔎 本段介紹虛構研究設計與圖表判讀。",
     })
+    teaching_topics = [
+        "研究問題界定", "疾病負擔評估", "既有治療缺口", "研究假說形成",
+        "試驗設計選擇", "收案族群界定", "納入條件判讀", "排除條件判讀",
+        "介入措施細節", "對照策略合理性", "隨機分派流程", "盲法執行品質",
+        "主要終點定義", "次要終點定義", "樣本數估算", "統計模型選擇",
+        "缺失資料處理", "敏感度分析", "基線平衡判讀", "主要結果解讀",
+        "次要結果解讀", "效果量臨床意義", "信賴區間判讀", "亞組分析限制",
+        "不良事件比較", "依從性與交叉", "追蹤完整程度", "偏差風險評估",
+        "外部效度判讀", "證據確定性", "研究優勢整理", "研究限制整理",
+        "臨床決策轉譯", "共享決策應用", "未來研究方向", "實務監測需求",
+        "資源配置考量", "病人價值整合", "指南一致程度", "結論適用邊界",
+    ]
     trailing = 3
     for index in range(target - len(slides) - trailing):
+        topic = teaching_topics[index]
         slides.append({
             "type": "content", "title": f"Teaching Point {index + 1}",
             "body": ["Clinical context:", "Synthetic research findings", "→ Teaching takeaway"],
-            "notes": "💡 **Synthetic study**（虛構研究）僅用於測試簡報流程。",
+            "notes": (
+                f"💡 **Synthetic study**（虛構研究）本頁聚焦{topic}，"
+                "僅用於測試完整簡報流程；請說明對應的研究背景與結果方向。"
+                " ✅ 教學結論必須結合限制並避免當作臨床證據。"
+            ),
         })
     slides.append({
         "type": "figure", "title": "Research Findings",
         "image": f"final_assets/{asset.name}",
         "caption": "Figure 1. Synthetic educational research illustration.",
-        "notes": "【圖片說明 — Figure 1】🖼️ 此圖為完全合成的教學圖表。",
+        "notes": "【圖片說明 — Figure 1】🖼️ 此圖為完全合成的教學圖表，請依序說明視覺元素、比較方向與限制。",
     })
     slides.append({
         "type": "references", "title": "References",
-        "items": ["Synthetic Education Team. Fictional Journal, 2026."],
-        "notes": "📖 本頁列出虛構文獻，僅供流程測試。",
+        "items": [
+            "Synthetic Education Team. Fictional Journal, 2026;1:1-10.",
+            "Example Methods Group. Imaginary Trials, 2025;2:11-20.",
+            "Demo Statistics Unit. Teaching Metrics, 2024;3:21-30.",
+            "Fictional Review Board. Safe Examples, 2023;4:31-40.",
+            "Synthetic Quality Network. Reproducible Demos, 2022;5:41-50.",
+        ],
+        "notes": "📖 本頁列出五筆完全虛構的參考文獻，僅供端到端流程與版面驗證使用。",
     })
-    slides.append({"type": "thanks", "title": "Thank You", "notes": "🙏 感謝聆聽虛構教學內容。"})
+    slides.append({
+        "type": "thanks",
+        "title": "Thank You",
+        "citation": "Synthetic Education Team. Fictional Journal, 2026.",
+        "notes": "🙏 感謝聆聽此份完全虛構的教學內容，歡迎提出問題與討論。",
+    })
     return {
         "meta": {
-            "footer_label": "Synthetic Education Team — Fictional Journal 2026",
+            "footer_label": (
+                "Synthetic Team et al — Fictional Journal 2026 | Reproducible demo"
+            ),
             "extraction_manifest": str(manifest),
         },
         "slides": slides,
@@ -335,6 +371,10 @@ def _synthetic_spec(asset: Path, *, mode: str, manifest: Path) -> dict[str, Any]
 
 
 def smoke_test(*, workspace: Path, mode: str, style: str, keep: bool = False) -> dict[str, Any]:
+    import build_deck
+    import image_polarity
+    import qa_gate
+
     from make_demo_paper import create_demo_paper
 
     private = workspace.expanduser().resolve() / ".skill-work"
@@ -362,6 +402,24 @@ def smoke_test(*, workspace: Path, mode: str, style: str, keep: bool = False) ->
             sys.executable, str(resolve_script("postprocess_assets")), "trim", str(candidates[0]),
             str(figure), "--asset-type", "figure",
         ], capture=True)
+        figure_sidecar = json.loads(
+            Path(str(figure) + ".postprocess.json").read_text(encoding="utf-8")
+        )
+        if figure_sidecar.get("safety_margin_px") != 16:
+            raise RuntimeError("Synthetic final Figure did not receive the default 16 px margin.")
+        from PIL import Image
+
+        with Image.open(figure) as rendered_figure:
+            expected = figure_sidecar.get("padding_background")
+            if (
+                rendered_figure.size != tuple(figure_sidecar.get("padded_size_px", []))
+                or figure_sidecar.get("padded_size_px", [0, 0])[0]
+                != figure_sidecar.get("unpadded_size_px", [0, 0])[0] + 32
+                or figure_sidecar.get("padded_size_px", [0, 0])[1]
+                != figure_sidecar.get("unpadded_size_px", [0, 0])[1] + 32
+                or list(rendered_figure.convert("RGB").getpixel((0, 0))) != expected
+            ):
+                raise RuntimeError("Synthetic final Figure safety canvas is not exactly 16 px.")
         specification = _synthetic_spec(figure, mode=mode, manifest=manifest)
         spec_path = root / "deck_spec.json"
         spec_path.write_text(json.dumps(specification, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -432,6 +490,9 @@ def parser() -> argparse.ArgumentParser:
     polarity.add_argument("--json", action="store_true")
     renderer = commands.add_parser("render", help="Optionally export a verified PowerPoint to PDF")
     renderer.add_argument("pptx", type=Path)
+    renderer.add_argument(
+        "--overwrite", action="store_true", help="Replace an existing sibling PDF explicitly"
+    )
     renderer.add_argument("--json", action="store_true")
     smoke = commands.add_parser("smoke-test", help="Run a synthetic end-to-end full-deck style test")
     smoke.add_argument("--workspace", type=Path, default=Path.cwd())
@@ -473,6 +534,8 @@ def main(argv: list[str] | None = None) -> int:
         output_dir = args.output_dir.expanduser().resolve() if args.output_dir else workspace
         payload = initialize_run(source, workspace=workspace, output_dir=output_dir, mode=args.mode, style=args.style)
         if args.command == "prepare":
+            import image_polarity
+
             run_checked([
                 sys.executable, str(resolve_script("extract_from_pdf")), str(source), "--out", payload["extracted_dir"],
             ], capture=args.json)
@@ -491,14 +554,21 @@ def main(argv: list[str] | None = None) -> int:
         arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
         return run_checked([sys.executable, str(resolve_script(args.script)), *arguments]).returncode
     if args.command == "qa-spec":
+        import qa_gate
+
         report = qa_gate.check_specification(args.spec.resolve(), mode=args.mode, style=args.style)
         emit(report, as_json=True) if args.json else qa_gate.print_report(report)
         return 0 if report["ok"] else 1
     if args.command == "qa":
+        import qa_gate
+
         report = qa_gate.check_all(args.spec.resolve(), args.pptx.resolve(), mode=args.mode, style=args.style)
         emit(report, as_json=True) if args.json else qa_gate.print_report(report)
         return 0 if report["ok"] else 1
     if args.command == "build":
+        import build_deck
+        import qa_gate
+
         before = qa_gate.check_specification(args.spec.resolve(), mode=args.mode, style=args.style)
         if not before["ok"]:
             qa_gate.print_report(before)
@@ -507,6 +577,8 @@ def main(argv: list[str] | None = None) -> int:
         emit(payload, as_json=args.json)
         return 0
     if args.command == "image-qa":
+        import image_polarity
+
         report = image_polarity.audit_extraction(args.manifest)
         if args.spec and report["ok"]:
             final = image_polarity.audit_final_assets(args.spec, report)
@@ -516,7 +588,7 @@ def main(argv: list[str] | None = None) -> int:
         emit(report, as_json=args.json)
         return 0 if report["ok"] else 1
     if args.command == "render":
-        emit(render_presentation(args.pptx), as_json=args.json)
+        emit(render_presentation(args.pptx, overwrite=args.overwrite), as_json=args.json)
         return 0
     if args.command == "smoke-test":
         emit(smoke_test(workspace=args.workspace, mode=args.mode, style=args.style, keep=args.keep), as_json=args.json)

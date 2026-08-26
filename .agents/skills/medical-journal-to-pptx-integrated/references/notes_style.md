@@ -8,8 +8,9 @@ closely.
 
 1. **Language**: Traditional Chinese (繁體中文). Technical terms stay English,
    wrapped in `**bold**`, with a Chinese gloss in parentheses on first use.
-2. **Opening**: Every note block starts with a lead emoji that telegraphs the
-   slide's purpose (📊 for data, 📌 for key definition, ⚠️ for caution,
+2. **Opening**: Every note block places a lead emoji in its opening scan block
+   (the first 96 characters) to telegraph the slide's purpose (📊 for data,
+   📌 for key definition, ⚠️ for caution,
    🎯 for core concept, 🔑 for takeaway, 📋 for checklist, 💡 for insight,
    🙏 for thanks, 📧 for contact, 📖 for references).
 3. **Structure**: Use visible bullets (`•`), sub-emojis (✅❌→), and short
@@ -18,6 +19,9 @@ closely.
 4. **Closing**: End content slides with a takeaway line led by ✅ 💡 or ⚠️.
 5. **Figure/Table slides**: Open with `【圖片說明 — <label>】` and describe
    each labeled sub-image in turn, then close with 💡 clinical meaning.
+6. **Page specificity**: Never reuse the same normalized note on more than two
+   slides. Short repeated phrases, glyph padding, non-string note values, and
+   Simplified-Chinese-only forms fail QA.
 
 ## Example 1 — Title slide
 

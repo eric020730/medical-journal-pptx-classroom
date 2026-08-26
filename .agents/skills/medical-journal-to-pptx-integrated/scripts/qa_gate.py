@@ -19,7 +19,9 @@ def check_specification(spec: Path, *, mode: str, style: str) -> dict[str, Any]:
     report = deck_quality.Report()
     if integrated.get("stage") == "specification":
         try:
-            deck_quality.check_spec(spec, report, content_mode=mode, style=style)
+            deck_quality.check_spec(
+                spec, report, content_mode=mode, style=style, strict=False
+            )
         except (OSError, ValueError, TypeError, KeyError) as error:
             report.fail("deck_specification", str(error), "Repair the JSON deck specification.")
 
@@ -52,12 +54,14 @@ def check_presentation(
     pptx: Path, *, spec: Path | None, mode: str, style: str
 ) -> dict[str, Any]:
     """Run independent built-file and teaching-presentation validators."""
-    integrated = qa_check.validate_presentation(pptx, spec_path=spec, mode=mode)
+    integrated = qa_check.validate_presentation(
+        pptx, spec_path=spec, mode=mode, style=style
+    )
     report = deck_quality.Report()
     if integrated.get("stage") == "presentation":
         try:
             deck_quality.check_pptx(
-                pptx, report, spec, content_mode=mode, style=style
+                pptx, report, spec, content_mode=mode, style=style, strict=False
             )
         except (OSError, ValueError, TypeError, KeyError) as error:
             report.fail("deck_presentation", str(error), "Rebuild the damaged PowerPoint.")

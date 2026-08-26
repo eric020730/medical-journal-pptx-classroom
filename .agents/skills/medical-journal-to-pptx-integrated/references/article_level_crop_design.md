@@ -13,6 +13,9 @@ Produce one usable crop per article Figure/Table item, not one crop per PDF imag
 5. Merge components into article-level final assets when needed.
 6. Preserve manual crop coordinates or notes in `crop_overrides.json`.
 7. Add unresolved crop concerns to the working notes and `crop_review.md`.
+8. Keep intermediate panel crops unpadded. After all crop and seam decisions are
+   complete, add the exact 16 px final safety canvas; include it in multi-panel
+   fit and native-label geometry rather than appending it afterwards.
 
 ## Caption Detection Heuristics
 

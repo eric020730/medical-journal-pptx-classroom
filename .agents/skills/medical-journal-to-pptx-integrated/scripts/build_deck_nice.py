@@ -187,10 +187,35 @@ class Builder:
     def content(self, s, n):
         sl = self.prs.slides.add_slide(self.blank); self.bg(sl, BG)
         self.header(sl, s["title"], s.get("kicker"))
-        txt(sl, Inches(0.7), Inches(1.35), Inches(12.0), Inches(5.4),
+        image = s.get("image")
+        body_width = Inches(7.15) if image else Inches(12.0)
+        txt(sl, Inches(0.7), Inches(1.35), body_width, Inches(5.4),
             s.get("body", s.get("items", s.get("bullets", []))),
             size=s.get("body_size", 18), color=BODY_C,
             line_spacing=1.12, space_after=7)
+        if image:
+            if not os.path.isabs(image):
+                image = os.path.join(self.base, image)
+            bx, by, bw, bh = (
+                Inches(8.20), Inches(1.40), Inches(4.50), Inches(5.25)
+            )
+            is_vector = str(image).lower().endswith((".emf", ".wmf"))
+            if is_vector:
+                aspect = _emf_aspect(image) or float(s.get("image_aspect") or 1.5)
+            else:
+                with Image.open(image) as source:
+                    aspect = source.width / source.height
+            if bw / bh > aspect:
+                draw_h = bh; draw_w = Emu(int(bh * aspect))
+            else:
+                draw_w = bw; draw_h = Emu(int(bw / aspect))
+            draw_x = bx + Emu(int((bw - draw_w) / 2))
+            draw_y = by + Emu(int((bh - draw_h) / 2))
+            if s.get("card", False) or is_vector:
+                pad = Inches(0.08)
+                rect(sl, draw_x - pad, draw_y - pad,
+                     draw_w + 2 * pad, draw_h + 2 * pad, CARD)
+            sl.shapes.add_picture(image, draw_x, draw_y, draw_w, draw_h)
         self.footer(sl, n); set_notes(sl, s.get("notes"))
 
     def figure(self, s, n):
@@ -267,6 +292,9 @@ class Builder:
             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
         txt(sl, Inches(0.9), Inches(3.8), Inches(11.5), Inches(1.2),
             s.get("subtitle", ""), size=16, color=SECON_C, align=PP_ALIGN.CENTER)
+        if s.get("citation"):
+            txt(sl, Inches(0.9), Inches(5.05), Inches(11.5), Inches(0.65),
+                s["citation"], size=13, color=SECON_C, align=PP_ALIGN.CENTER)
         set_notes(sl, s.get("notes"))
 
     def build(self):

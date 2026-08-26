@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+import qa_check
+
 MODE_LIMITS = {"full": (40, 55)}
 TABLE_MARGIN_MIN = 8
 POSTPROCESS_SUFFIX = ".postprocess.json"
@@ -125,7 +127,15 @@ def table_split_group(image_path):
     return m.group(1).lower() if m else None
 
 
-def check_spec(spec_path, rep, *, content_mode="full", style="standard"):
+def check_spec(spec_path, rep, *, content_mode="full", style="standard", strict=True):
+    if strict:
+        strict_report = qa_check.validate_specification(
+            spec_path, mode=content_mode, audit_images=False
+        )
+        for failure in strict_report.get("failures", []):
+            rep.fail("strict_schema", failure, "Repair the canonical deck specification.")
+        for warning in strict_report.get("warnings", []):
+            rep.warn("strict_schema", warning)
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     spec_dir = spec_path.parent
     slides = spec.get("slides", [])
@@ -291,7 +301,7 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard"):
                          "post-build label flow (recompose_panels_banded.py + "
                          "add_panel_labels.py) and omit panel_labels from the spec.")
 
-        semantic_labels = labels or sidecar.get("embedded_labels") or sidecar.get("labels") or []
+        semantic_labels = labels or sidecar.get("labels") or sidecar.get("embedded_labels") or []
         lab_set = {str(l).upper() for l in semantic_labels}
         if lab_set:
             ghost = referenced_panel_letters(str(s.get("notes", ""))) - lab_set
@@ -310,7 +320,7 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard"):
             if side.get("command") in {"trim", "labels"} and isinstance(side.get("margin"), int) \
                     and side["margin"] < TABLE_MARGIN_MIN:
                 rep.fail("table_margin", f"slide {idx} table {name} margin={side['margin']} (< {TABLE_MARGIN_MIN}px)",
-                         "Re-trim with --margin 12 (safety band 8-24px) so text/gridlines "
+                         "Re-trim with --margin 16 (safety band 8-24px) so text/gridlines "
                          "never touch the edge.")
 
         fn = figure_number(s)
@@ -405,13 +415,26 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard"):
         rep.ok("logo_path", "no meta.logo_path (builder uses bundled default logo)")
 
 
-def check_pptx(pptx_path, rep, spec_path=None, *, content_mode="full", style="standard"):
+def check_pptx(
+    pptx_path, rep, spec_path=None, *, content_mode="full", style="standard", strict=True
+):
     try:
         from pptx import Presentation
     except ImportError:
         rep.fail("pptx_import", "python-pptx not installed",
                  "pip install python-pptx --break-system-packages")
         return
+
+    if strict:
+        strict_report = qa_check.validate_presentation(
+            pptx_path, spec_path=spec_path, mode=content_mode, style=style
+        )
+        for failure in strict_report.get("failures", []):
+            rep.fail(
+                "strict_presentation", failure, "Rebuild and re-run the canonical QA gate."
+            )
+        for warning in strict_report.get("warnings", []):
+            rep.warn("strict_presentation", warning)
 
     prs = Presentation(str(pptx_path))
     slides = list(prs.slides)
@@ -491,7 +514,7 @@ def check_pptx(pptx_path, rep, spec_path=None, *, content_mode="full", style="st
                     image_path = spec_path.parent / image_path
                 sidecar = read_sidecar(image_path) or {}
                 if sidecar.get("native_labels"):
-                    labels = sidecar.get("labels") or []
+                    labels = sidecar.get("native_label_values") or sidecar.get("labels") or []
             if not isinstance(labels, list) or not labels:
                 continue
             checked += len(labels)

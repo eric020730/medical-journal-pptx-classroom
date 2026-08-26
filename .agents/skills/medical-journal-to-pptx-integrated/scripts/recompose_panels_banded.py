@@ -39,6 +39,7 @@ Key options
                       bundled medical-journal builder's 12.10 x 4.85 in)
   --bg                band / gutter color, match the slide background (#061428)
   --gap               inter-panel gutter in px (default 16)
+  --safety-margin-px  exact outer canvas margin in px (default 16)
   --source-label-policy  auto, preserve, or crop-safe-margin
   --max-edge-px       maximum removable white/gray rim depth per side (default 4)
   --max-boundary-shift-px  maximum source-row seam adjustment for a split
@@ -57,7 +58,7 @@ import argparse, json, os
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageColor
 
 
 def source_metadata(path):
@@ -69,35 +70,134 @@ def source_metadata(path):
         metadata = json.loads(sidecar.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return metadata if isinstance(metadata, dict) else {}
+    if not isinstance(metadata, dict):
+        return {}
+    metadata = dict(metadata)
+    metadata["_sidecar_dir"] = str(sidecar.expanduser().resolve().parent)
+    return metadata
 
 
-def label_details(metadata):
-    """Accept either structured or flat placement data from any paper extractor."""
+def resolved_source_path(metadata):
+    """Resolve a sidecar source relative to that sidecar, never process CWD."""
+    source = metadata.get("source")
+    if not isinstance(source, str) or not source.strip():
+        return None
+    path = Path(source).expanduser()
+    if not path.is_absolute():
+        base = Path(metadata.get("_sidecar_dir") or ".")
+        path = base / path
+    return path.resolve(strict=False)
+
+
+def normalized_box(value):
+    """Return a numeric four-value box, or None for incomplete metadata."""
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        box = tuple(float(item) for item in value)
+    except (TypeError, ValueError):
+        return None
+    return box if box[0] < box[2] and box[1] < box[3] else None
+
+
+def box_relationship(label_box, image_box):
+    """Classify a label against image content, tolerating PDF glyph overshoot.
+
+    PDF text boxes can intrude a fraction of a point into the adjacent raster
+    even when the visible letter is printed in the exterior margin. Treat the
+    label as embedded only when its center is inside the image or at least 15%
+    of its bounding-box area overlaps image content.
+    """
+    label_box = normalized_box(label_box)
+    image_box = normalized_box(image_box)
+    if label_box is None or image_box is None:
+        return None, None
+    lx0, ly0, lx1, ly1 = label_box
+    ix0, iy0, ix1, iy1 = image_box
+    overlap_w = max(0.0, min(lx1, ix1) - max(lx0, ix0))
+    overlap_h = max(0.0, min(ly1, iy1) - max(ly0, iy0))
+    overlap_fraction = overlap_w * overlap_h / ((lx1 - lx0) * (ly1 - ly0))
+    center_x, center_y = (lx0 + lx1) / 2.0, (ly0 + ly1) / 2.0
+    center_inside = ix0 <= center_x <= ix1 and iy0 <= center_y <= iy1
+    placement = "embedded" if center_inside or overlap_fraction >= 0.15 else "external-margin"
+    return placement, overlap_fraction
+
+
+def project_box(box, crop_box, image_size):
+    """Project a PDF/source-space box into the current panel's pixel space."""
+    box = normalized_box(box)
+    crop_box = normalized_box(crop_box)
+    if box is None or crop_box is None:
+        return None
+    cx0, cy0, cx1, cy1 = crop_box
+    width, height = image_size
+    return [
+        int(round((box[0] - cx0) * width / (cx1 - cx0))),
+        int(round((box[1] - cy0) * height / (cy1 - cy0))),
+        int(round((box[2] - cx0) * width / (cx1 - cx0))),
+        int(round((box[3] - cy0) * height / (cy1 - cy0))),
+    ]
+
+
+def label_details(metadata, image):
+    """Resolve placement from geometry instead of trusting a stale label flag."""
     nested = metadata.get("source_panel_label")
     nested = nested if isinstance(nested, dict) else {}
-    placement = str(
+    declared = str(
         nested.get("placement")
         or metadata.get("source_label_placement")
         or metadata.get("label_placement")
         or ("embedded" if metadata.get("embedded_label") else "")
     ).strip().lower().replace("_", "-")
-    if metadata.get("source_label_policy") == "preserve":
-        placement = "embedded"
     box = (
         nested.get("box_px")
         or nested.get("bbox")
         or metadata.get("source_label_box_px")
         or metadata.get("label_box_px")
     )
-    return placement, box
+    box = normalized_box(box)
+
+    geometry_space = ""
+    placement = ""
+    overlap_fraction = None
+    local_image_box = (
+        nested.get("image_box_px")
+        or metadata.get("source_image_content_box_px")
+        or metadata.get("image_content_box_px")
+    )
+    image_box = normalized_box(local_image_box)
+    if box is not None and image_box is not None:
+        placement, overlap_fraction = box_relationship(box, image_box)
+        geometry_space = "panel-px"
+    else:
+        source_label_box = nested.get("box_pt") or metadata.get("source_label_bbox_pt")
+        source_image_box = nested.get("image_box_pt") or metadata.get("source_image_bbox_pt")
+        placement, overlap_fraction = box_relationship(source_label_box, source_image_box)
+        if placement:
+            geometry_space = "source-pt"
+            crop_box = nested.get("crop_box_pt") or metadata.get("source_crop_bbox_pt")
+            if box is None:
+                box = normalized_box(project_box(source_label_box, crop_box, image.size))
+            if image_box is None:
+                image_box = normalized_box(project_box(source_image_box, crop_box, image.size))
+
+    if not placement:
+        placement = declared
+    return {
+        "placement": placement,
+        "box": list(box) if box is not None else None,
+        "image_box": list(image_box) if image_box is not None else None,
+        "declared_placement": declared,
+        "geometry_space": geometry_space,
+        "overlap_fraction": overlap_fraction,
+    }
 
 
 def overwritten_source_pixels(image, metadata):
     """Catch solid corner masks when a panel claims to be an exact source crop."""
-    source = metadata.get("source")
+    source = resolved_source_path(metadata)
     box = metadata.get("crop_box_px")
-    if not isinstance(source, str) or not isinstance(box, (list, tuple)) or len(box) != 4:
+    if source is None or not isinstance(box, (list, tuple)) or len(box) != 4:
         return 0
     try:
         original = Image.open(source).convert("RGB").crop(tuple(int(value) for value in box))
@@ -142,7 +242,7 @@ def edge_line(array, side, depth):
     return array[:, -depth - 1, :]
 
 
-def is_disposable_rim(line, inner_line=None):
+def is_disposable_rim(line, inner_line=None, allow_gray_plateau=True):
     """Classify a thin achromatic seam without consuming dark image canvas.
 
     PDF image-object renders often add one full-edge white or mid-gray column
@@ -165,26 +265,31 @@ def is_disposable_rim(line, inner_line=None):
 
     if near_white >= 0.70:
         return True
-    if dominant_fraction >= 0.50 and dominant_luminance >= 70:
-        return True
-    if float(luminance.std()) <= 32 and float(luminance.mean()) >= 70:
-        return True
 
-    # Preserve uniformly dark clinical canvas, but allow a low-luminance
-    # antialiased hairline when it is demonstrably brighter than the next line
-    # inward.  The one-way contrast check also preserves meaningful dark frames
-    # bordering brighter anatomy.
+    # A non-white gray line is removable only when it is both flat and clearly
+    # brighter than the next line inward. Uniform gray MRI background is common
+    # at an image edge; treating flatness alone as whitespace caused a genuine
+    # clinical region after a 2px white seam to exhaust the 4px budget, which in
+    # turn preserved the white seam. The one-way contrast test still removes
+    # gray/antialiased rims and preserves dark frames facing brighter anatomy.
     if inner_line is None:
         return False
     inner = inner_line.astype(np.int16)
     inner_saturation = inner.max(axis=1) - inner.min(axis=1)
     if float(np.mean(inner_saturation > 24)) > 0.20:
         return False
-    return (
-        float(luminance.mean()) >= 40
-        and float(luminance.std()) <= 16
-        and float(luminance.mean() - inner.mean(axis=1).mean()) >= 32
+    flat_gray = (
+        dominant_fraction >= 0.50 and dominant_luminance >= 40
+    ) or (
+        float(luminance.std()) <= 32 and float(luminance.mean()) >= 40
     )
+    contrast = float(luminance.mean() - inner.mean(axis=1).mean())
+    gray_plateau = (
+        allow_gray_plateau
+        and float(luminance.mean()) >= 70
+        and abs(contrast) <= 4
+    )
+    return flat_gray and (contrast >= 32 or gray_plateau)
 
 
 def clean_panel_edges(image, max_edge_px=4):
@@ -200,9 +305,12 @@ def clean_panel_edges(image, max_edge_px=4):
     for side in trim_px:
         depth_limit = min(max_edge_px, (height if side in ("top", "bottom") else width) - 2)
         removable = 0
+        first = edge_line(pixels, side, 0).astype(np.int16)
+        starts_near_white = float(np.mean(first.min(axis=1) >= 210)) >= 0.70
         while removable <= depth_limit and is_disposable_rim(
             edge_line(pixels, side, removable),
             edge_line(pixels, side, removable + 1),
+            allow_gray_plateau=not starts_near_white,
         ):
             removable += 1
 
@@ -336,15 +444,15 @@ def reconcile_panel_boundaries(images, metadata, max_shift_px=24):
     groups = {}
     boxes = {}
     for index, (image, entry) in enumerate(zip(images, metadata)):
-        placement, _ = label_details(entry)
+        placement = label_details(entry, image)["placement"]
         if placement not in {"embedded", "overlay", "overlap"}:
             continue
-        source = entry.get("source")
+        source = resolved_source_path(entry)
         box = entry.get("crop_box_px")
-        if not isinstance(source, str) or not isinstance(box, (list, tuple)) or len(box) != 4:
+        if source is None or not isinstance(box, (list, tuple)) or len(box) != 4:
             continue
         try:
-            resolved = str(Path(source).expanduser().resolve(strict=True))
+            resolved = str(source.resolve(strict=True))
             normalized = tuple(int(value) for value in box)
             if resolved not in sources:
                 sources[resolved] = Image.open(resolved).convert("RGB")
@@ -430,12 +538,15 @@ def reconcile_panel_boundaries(images, metadata, max_shift_px=24):
     repaired = list(images)
     for index, changes in enumerate(decisions):
         if changes:
-            source = str(Path(metadata[index]["source"]).expanduser().resolve())
+            source_path = resolved_source_path(metadata[index])
+            if source_path is None:
+                continue
+            source = str(source_path)
             repaired[index] = sources[source].crop(tuple(boxes[index]))
     return repaired, decisions
 
 
-def crop_safe_label_margin(image, box):
+def crop_safe_label_margin(image, box, image_box=None):
     """Crop a full exterior label band only when its remaining pixels are flat."""
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return None
@@ -447,28 +558,47 @@ def crop_safe_label_margin(image, box):
     if not (0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height):
         return None
 
-    sides = {
-        "left": x0 / width,
-        "right": (width - x1) / width,
-        "top": y0 / height,
-        "bottom": (height - y1) / height,
-    }
-    side = min(sides, key=sides.get)
+    content = normalized_box(image_box)
+    if content is not None:
+        ix0, iy0, ix1, iy1 = (int(round(value)) for value in content)
+        if not (0 <= ix0 < ix1 <= width and 0 <= iy0 < iy1 <= height):
+            return None
+        center_x, center_y = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        exterior_sides = {}
+        if center_x < ix0:
+            exterior_sides["left"] = ix0 - center_x
+        if center_x > ix1:
+            exterior_sides["right"] = center_x - ix1
+        if center_y < iy0:
+            exterior_sides["top"] = iy0 - center_y
+        if center_y > iy1:
+            exterior_sides["bottom"] = center_y - iy1
+        if not exterior_sides:
+            return None
+        side = min(exterior_sides, key=exterior_sides.get)
+    else:
+        sides = {
+            "left": x0 / width,
+            "right": (width - x1) / width,
+            "top": y0 / height,
+            "bottom": (height - y1) / height,
+        }
+        side = min(sides, key=sides.get)
     pad = 2
     if side == "bottom":
-        boundary = max(0, y0 - pad)
+        boundary = iy1 if content is not None else max(0, y0 - pad)
         region = (0, boundary, width, height)
         retained = (0, 0, width, boundary)
     elif side == "top":
-        boundary = min(height, y1 + pad)
+        boundary = iy0 if content is not None else min(height, y1 + pad)
         region = (0, 0, width, boundary)
         retained = (0, boundary, width, height)
     elif side == "right":
-        boundary = max(0, x0 - pad)
+        boundary = ix1 if content is not None else max(0, x0 - pad)
         region = (boundary, 0, width, height)
         retained = (0, 0, boundary, height)
     else:
-        boundary = min(width, x1 + pad)
+        boundary = ix0 if content is not None else min(width, x1 + pad)
         region = (0, 0, boundary, height)
         retained = (boundary, 0, width, height)
 
@@ -489,39 +619,75 @@ def crop_safe_label_margin(image, box):
         return None
     background = np.median(samples, axis=0)
     uniform_fraction = float(np.mean(np.max(np.abs(samples - background), axis=1) <= 18))
-    if uniform_fraction < 0.985:
+    # Once the documented label box is excluded, the removable exterior band
+    # must be effectively flat.  The older 98.5% rule could discard a narrow
+    # colour scale or clinical overlay occupying only ~1% of the band.
+    if uniform_fraction < 0.999:
         return None
-    return image.crop(retained), {"side": side, "pixels": band_depth}
+    decision = {"side": side, "pixels": band_depth}
+    if content is not None:
+        # An extractor-provided image box is stronger evidence than an edge
+        # luminance heuristic: it identifies the exact embedded raster inside
+        # a PDF-rendered crop. Remove that verified exterior frame first, then
+        # let clean_panel_edges inspect only the raster's bounded antialiased
+        # rim. Otherwise a 3px page frame plus a 2px raster hairline becomes a
+        # 5px bright band, exceeds the 4px heuristic cap, and remains intact.
+        decision["verified_image_box_crop_px"] = {
+            "top": iy0,
+            "bottom": height - iy1,
+            "left": ix0,
+            "right": width - ix1,
+        }
+        return image.crop((ix0, iy0, ix1, iy1)), decision
+    return image.crop(retained), decision
 
 
 def resolve_source_labels(images, metadata, requested_policy):
-    """Make one conservative, figure-wide decision to avoid mixed/duplicate labels."""
-    details = [label_details(entry) for entry in metadata]
-    embedded = any(placement in {"embedded", "overlay", "overlap"} for placement, _ in details)
-    exterior = [index for index, (placement, _) in enumerate(details)
-                if placement in {"external-margin", "exterior-margin", "margin"}]
+    """Resolve each panel independently, preserving only labels on image content."""
+    details = [label_details(entry, image) for entry, image in zip(metadata, images)]
+    if requested_policy == "preserve":
+        return images, "preserve", [{} for _ in images], ["preserved"] * len(images), details
 
-    if requested_policy == "preserve" or embedded:
-        if requested_policy == "crop-safe-margin" and embedded:
-            raise ValueError("embedded image labels cannot be safely cropped from an exterior margin")
-        return images, "preserve", [{} for _ in images]
-
-    if requested_policy == "crop-safe-margin" and len(exterior) != len(images):
-        raise ValueError("crop-safe-margin requires an exterior-margin placement and label box for every panel")
-
-    if exterior:
-        cleaned = list(images)
-        decisions = [{} for _ in images]
-        for index in exterior:
-            result = crop_safe_label_margin(cleaned[index], details[index][1])
+    cleaned = list(images)
+    decisions = [{} for _ in images]
+    modes = []
+    for index, detail in enumerate(details):
+        placement = detail["placement"]
+        if placement in {"embedded", "overlay", "overlap"}:
+            if requested_policy == "crop-safe-margin":
+                raise ValueError("embedded image labels cannot be safely cropped from an exterior margin")
+            modes.append("preserved")
+            continue
+        if placement in {"external-margin", "exterior-margin", "margin"}:
+            result = crop_safe_label_margin(
+                cleaned[index], detail["box"], detail.get("image_box")
+            )
             if result is None:
                 if requested_policy == "crop-safe-margin":
                     raise ValueError("source-label margin contains image content or lacks a verified label box")
-                return images, "preserve", [{} for _ in images]
+                modes.append("preserved")
+                continue
             cleaned[index], decisions[index] = result
-        return cleaned, "crop-safe-margin", decisions
+            modes.append("native")
+            continue
+        if requested_policy == "crop-safe-margin":
+            raise ValueError("crop-safe-margin requires an exterior-margin placement and label box for every panel")
+        # Missing/unknown metadata is ambiguous: a visible source label may be
+        # embedded in image pixels. AUTO therefore preserves it and emits no
+        # native duplicate. Explicit crop-safe-margin still fails above.
+        modes.append("preserved")
 
-    return images, "native", [{} for _ in images]
+    has_native = "native" in modes
+    has_preserved = "preserved" in modes
+    if has_native and has_preserved:
+        policy = "mixed"
+    elif has_preserved:
+        policy = "preserve"
+    elif any(decisions):
+        policy = "crop-safe-margin"
+    else:
+        policy = "native"
+    return cleaned, policy, decisions, modes, details
 
 
 def layout_dimensions(panels, cols, band, gap):
@@ -554,39 +720,55 @@ def layout_dimensions(panels, cols, band, gap):
     return target_width, total_height, final_rows, row_heights, gutter
 
 
-def layout(panels, cols, band, bg, gap):
+def layout(panels, cols, band, bg, gap, safety_margin_px):
     """Compose a grid and return right/bottom anchors in source reading order."""
     target_width, total_height, final_rows, row_heights, gutter = layout_dimensions(
         panels, cols, band, gap
     )
-    canvas = Image.new("RGB", (target_width, total_height), bg)
-    rects = []; y = 0
+    canvas = Image.new(
+        "RGB",
+        (target_width + 2 * safety_margin_px, total_height + 2 * safety_margin_px),
+        bg,
+    )
+    rects = []; y = safety_margin_px
     panel_index = 0
     for row_index, row in enumerate(final_rows):
-        x = 0
+        x = safety_margin_px
         for width, height in row:
             panel = panels[panel_index].resize((width, height), Image.LANCZOS)
             canvas.paste(panel, (x, y))
-            rects.append((x + width, y + row_heights[row_index]))
+            rects.append({"x": x, "y": y, "w": width, "h": height})
             x += width + gutter
             panel_index += 1
         y += row_heights[row_index] + band
     return canvas, rects
 
 
-def evaluate_layout(panels, cols, band_in, box_width_in, box_height_in, gap):
+def evaluate_layout(
+    panels,
+    cols,
+    band_in,
+    box_width_in,
+    box_height_in,
+    gap,
+    safety_margin_px,
+):
     """Score a candidate using the actual slide-fit and fixed-size label bands."""
     band = 2 if band_in > 0 else 0
     for _ in range(12):
         width, height, _, _, _ = layout_dimensions(panels, cols, band, gap)
-        fit = min(box_width_in / width, box_height_in / height)
+        padded_width = width + 2 * safety_margin_px
+        padded_height = height + 2 * safety_margin_px
+        fit = min(box_width_in / padded_width, box_height_in / padded_height)
         next_band = max(2, int(round(band_in / fit))) if band_in > 0 else 0
         if next_band == band:
             break
         band = next_band
 
     width, height, rows, _, gutter = layout_dimensions(panels, cols, band, gap)
-    fit = min(box_width_in / width, box_height_in / height)
+    padded_width = width + 2 * safety_margin_px
+    padded_height = height + 2 * safety_margin_px
+    fit = min(box_width_in / padded_width, box_height_in / padded_height)
     displayed = [
         (panel_width * fit, panel_height * fit)
         for row in rows for panel_width, panel_height in row
@@ -600,8 +782,11 @@ def evaluate_layout(panels, cols, band_in, box_width_in, box_height_in, gap):
         "rows": len(rows),
         "band_px": band,
         "gutter_px": gutter,
-        "composite_width_px": width,
-        "composite_height_px": height,
+        "composite_width_px": padded_width,
+        "composite_height_px": padded_height,
+        "unpadded_width_px": width,
+        "unpadded_height_px": height,
+        "safety_margin_px": safety_margin_px,
         "fit_in_per_px": fit,
         "min_panel_area_sq_in": min(areas),
         "min_panel_short_edge_in": min(short_edges),
@@ -648,6 +833,8 @@ def main():
     ap.add_argument("--slide-box-h-in", type=float, default=4.85)
     ap.add_argument("--bg", default="#061428")
     ap.add_argument("--gap", type=int, default=16)
+    ap.add_argument("--safety-margin-px", type=int, default=16,
+                    help="exact outer canvas margin in px (default: 16)")
     ap.add_argument("--source-label-policy", choices=("auto", "preserve", "crop-safe-margin"),
                     default="auto", help="preserve embedded labels; crop only verified exterior margins")
     ap.add_argument("--max-edge-px", type=int, default=4,
@@ -665,9 +852,21 @@ def main():
         ap.error("--max-edge-px must be between 0 and 12")
     if not 0 <= a.max_boundary_shift_px <= 64:
         ap.error("--max-boundary-shift-px must be between 0 and 64")
+    if not 0 <= a.safety_margin_px <= 256:
+        ap.error("--safety-margin-px must be between 0 and 256")
 
     bg = hexrgb(a.bg)
-    labels = [s for s in a.labels.split(",") if s] if a.labels else []
+    output_path = Path(a.output).expanduser().resolve(strict=False)
+    input_paths = [Path(path).expanduser().resolve(strict=False) for path in a.inputs]
+    if output_path in input_paths:
+        ap.error("output must differ from every input panel")
+    geometry_path = Path(a.geometry).expanduser().resolve(strict=False)
+    if geometry_path == output_path or geometry_path in input_paths:
+        ap.error("geometry output must differ from the composite and every input panel")
+
+    labels = [s.strip() for s in a.labels.split(",") if s.strip()] if a.labels else []
+    if labels and len(labels) != len(a.inputs):
+        ap.error(f"label count ({len(labels)}) must equal panel count ({len(a.inputs)})")
     panel_metadata = [source_metadata(path) for path in a.inputs]
     panels = [Image.open(p).convert("RGB") for p in a.inputs]
     for path, panel, metadata in zip(a.inputs, panels, panel_metadata):
@@ -684,8 +883,11 @@ def main():
     except ValueError as error:
         ap.error(str(error))
     try:
-        panels, label_policy, label_margins = resolve_source_labels(
-            panels, panel_metadata, a.source_label_policy
+        panels, label_policy, label_margins, label_modes, label_detection = resolve_source_labels(
+            panels,
+            panel_metadata,
+            # Without replacement label values, never remove a source label.
+            a.source_label_policy if labels else "preserve",
         )
     except ValueError as error:
         ap.error(str(error))
@@ -701,21 +903,23 @@ def main():
         cleanup = [{side: 0 for side in ("top", "bottom", "left", "right")} for _ in panels]
 
     glyph_h = a.label_pt / 72.0 * a.glyph_ratio          # on-screen label height (in)
-    native_labels = label_policy != "preserve"
+    native_labels = "native" in label_modes
     band_in = a.gap_above_in + glyph_h + a.gap_below_in if native_labels else 0
     drop_in = a.gap_above_in + a.center_offset_in         # panel bottom -> label box center
 
     candidate_columns = [a.cols] if a.cols is not None else range(1, len(panels) + 1)
     candidates = [
         evaluate_layout(panels, columns, band_in,
-                        a.slide_box_w_in, a.slide_box_h_in, a.gap)
+                        a.slide_box_w_in, a.slide_box_h_in, a.gap,
+                        a.safety_margin_px)
         for columns in candidate_columns
     ]
     selected = max(candidates, key=layout_score)
     cols = selected["cols"]
     band = selected["band_px"]
-    comp, rects = layout(panels, cols, band, bg, a.gap)
-    comp.save(a.output)
+    comp, rects = layout(panels, cols, band, bg, a.gap, a.safety_margin_px)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    comp.save(output_path)
     W, H = comp.size
     fit = min(a.slide_box_w_in / W, a.slide_box_h_in / H)
     drop_px = drop_in / fit
@@ -725,16 +929,21 @@ def main():
     if os.path.exists(a.geometry):
         geom = json.load(open(a.geometry))
     geom[name] = ([{"label": labels[i] if i < len(labels) else "",
-                    "fx_right": rects[i][0] / W,
-                    "fy_center": (rects[i][1] + drop_px) / H}
-                   for i in range(len(rects))] if native_labels else [])
+                    "fx_right": (rects[i]["x"] + rects[i]["w"]) / W,
+                    "fy_center": (rects[i]["y"] + rects[i]["h"] + drop_px) / H}
+                   for i in range(len(rects)) if label_modes[i] == "native"]
+                  if native_labels else [])
     json.dump(geom, open(a.geometry, "w"), indent=1)
 
     # postprocess sidecar (so the bundled build_deck.py asset gate passes)
     json.dump({"command": "recompose-panels-banded", "asset_type": "figure",
                "labels": labels, "native_labels": native_labels,
+               "native_label_values": [labels[index] for index, mode in enumerate(label_modes)
+                                       if mode == "native" and index < len(labels)],
+               "native_label_color": "#8FA8C8",
                "source_label_policy": label_policy,
-               "embedded_labels": labels if not native_labels else [],
+               "embedded_labels": [labels[index] for index, mode in enumerate(label_modes)
+                                   if mode == "preserved" and index < len(labels)],
                "max_edge_px": a.max_edge_px,
                "max_boundary_shift_px": a.max_boundary_shift_px,
                "panel_cleanup": [
@@ -742,18 +951,34 @@ def main():
                     "label": labels[index] if index < len(labels) else "",
                     "edge_trim_px": cleanup[index],
                     "label_margin_crop": label_margins[index],
-                    "label_action": ("preserved" if not native_labels else
+                    "label_action": ("preserved" if label_modes[index] == "preserved" else
                                      "cropped-exterior-margin" if label_margins[index] else
                                      "already-absent"),
+                    "label_detection": label_detection[index],
                     "label_overwritten_pixels": 0,
                     "boundary_adjustments": boundary_adjustments[index]}
                    for index, path in enumerate(a.inputs)
                ],
                "source_inputs": [os.path.abspath(path) for path in a.inputs],
+               "panel_boxes_px": rects,
                "layout_mode": "manual" if a.cols is not None else "auto",
+               "requested_cols": a.cols,
+               "requested_source_label_policy": a.source_label_policy,
                "cols": cols, "rows": selected["rows"],
+               "margin": a.safety_margin_px,
+               "safety_margin_px": a.safety_margin_px,
+               "padding_background": "#" + "".join(
+                   f"{channel:02X}" for channel in ImageColor.getrgb(a.bg)[:3]
+               ),
+               "unpadded_size_px": [selected["unpadded_width_px"],
+                                    selected["unpadded_height_px"]],
+               "padded_size_px": [W, H],
                "slide_box_w_in": a.slide_box_w_in,
                "slide_box_h_in": a.slide_box_h_in,
+               "glyph_ratio": a.glyph_ratio,
+               "center_offset_in": a.center_offset_in,
+               "gap": a.gap,
+               "no_trim": a.no_trim,
                "layout_candidates": candidates,
                "gap_above_in": a.gap_above_in, "gap_below_in": a.gap_below_in,
                "label_pt": a.label_pt},

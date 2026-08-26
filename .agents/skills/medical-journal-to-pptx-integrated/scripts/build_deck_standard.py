@@ -25,6 +25,8 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from PIL import Image
 
+import vector_table
+
 # ---------- Style constants (match references/visual_style.md) ----------
 
 SLIDE_W = Inches(13.333)
@@ -66,6 +68,7 @@ DEFAULT_PALETTE = {
 }
 
 POSTPROCESS_SUFFIX = ".postprocess.json"
+RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"}
 
 
 def hex_to_rgb(h: str) -> RGBColor:
@@ -75,22 +78,64 @@ def hex_to_rgb(h: str) -> RGBColor:
 
 def require_postprocessed_figure_assets(spec: dict, spec_dir: Path) -> None:
     missing = []
+    invalid = []
+    image_count = 0
     for idx, slide in enumerate(spec.get("slides", []), start=1):
-        if slide.get("type") != "figure" or not slide.get("image"):
+        if not slide.get("image"):
             continue
         image_path = Path(slide["image"])
         if not image_path.is_absolute():
             image_path = (spec_dir / image_path).resolve()
-        if image_path.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+        image_count += 1
+        suffix = image_path.suffix.lower()
+        if suffix not in RASTER_SUFFIXES | vector_table.VECTOR_SUFFIXES:
+            invalid.append(f"slide {idx}: unsupported image format {image_path.suffix!r}")
             continue
         sidecar = image_path.with_suffix(image_path.suffix + POSTPROCESS_SUFFIX)
         if not sidecar.exists():
             missing.append(f"slide {idx}: {image_path}")
-    if missing:
-        detail = "\n".join(f"- {item}" for item in missing)
+            continue
+        if suffix in vector_table.VECTOR_SUFFIXES:
+            try:
+                metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                invalid.append(f"slide {idx}: unreadable vector sidecar ({error})")
+                continue
+            if not isinstance(metadata, dict):
+                invalid.append(f"slide {idx}: vector sidecar must be a JSON object")
+                continue
+            invalid.extend(
+                f"slide {idx}: {failure}"
+                for failure in vector_table.sidecar_structure_failures(metadata)
+            )
+
+    manifest: Path | None = None
+    meta = spec.get("meta")
+    if isinstance(meta, dict):
+        for key in ("extraction_manifest", "extracted_manifest"):
+            value = meta.get(key)
+            if isinstance(value, str) and value.strip():
+                candidate = Path(value).expanduser()
+                manifest = candidate.resolve() if candidate.is_absolute() else (spec_dir / candidate).resolve()
+                break
+    if manifest is None:
+        for candidate in (
+            spec_dir / "extracted" / "manifest.json",
+            spec_dir.parent / "extracted" / "manifest.json",
+        ):
+            if candidate.is_file():
+                manifest = candidate.resolve()
+                break
+    if image_count and (manifest is None or not manifest.is_file()):
+        invalid.append(
+            "all slide images require a readable extraction manifest before canonical build"
+        )
+
+    if missing or invalid:
+        detail = "\n".join(f"- {item}" for item in [*missing, *invalid])
         raise RuntimeError(
-            "Figure/Table assets must pass postprocess_assets.py before deck build. "
-            "Missing postprocess sidecars:\n" + detail
+            "All slide images must pass authenticated postprocessing before deck build:\n"
+            + detail
         )
 
 
@@ -528,6 +573,10 @@ def build_figure(slide, data, pal, logo_path, footer_label,
             for idx, label in enumerate(panel_labels):
                 if idx < len(x_fracs):
                     right_frac = float(x_fracs[idx])
+                elif idx < len(panel_boxes) and isinstance(panel_boxes[idx], dict):
+                    right_frac = float(
+                        panel_boxes[idx].get("right_x_frac", (idx + 1) / max(1, n))
+                    )
                 else:
                     right_frac = (idx + 1) / max(1, n)
                 label_x = draw_x + int(draw_w * right_frac) - label_w

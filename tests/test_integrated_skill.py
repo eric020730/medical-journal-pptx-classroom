@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,8 +11,8 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from PIL import Image, ImageDraw
-import pptx
+import pymupdf
+from PIL import Image
 from pptx import Presentation
 from pptx.enum.dml import MSO_FILL
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -68,14 +67,16 @@ class IntegratedSkillStructureTests(unittest.TestCase):
     def test_skill_identity_version_and_concise_entrypoint(self) -> None:
         content = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn(f"name: {SKILL_NAME}", content)
-        self.assertLess(len(content.splitlines()), 110)
+        self.assertLess(len(content.splitlines()), 140)
         self.assertIn("40–55 slides", content)
         self.assertIn("`full` is the only supported content mode", content)
         self.assertIn("--mode full", content)
-        self.assertEqual(
-            (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
-            "v4.0.1",
+        version = (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertEqual(version, "v4.1.0")
+        project = json.loads(
+            (PROJECT_ROOT / ".classroom-project.json").read_text(encoding="utf-8")
         )
+        self.assertEqual(project["integrated_skill_version"], version)
 
     def test_skill_preserves_all_image_building_and_quality_helpers(self) -> None:
         expected = {
@@ -283,6 +284,21 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
             _, _, rendered = create_synthetic_inversion_fixture(root)
             first = write_asset(root, "panel-A.png", source=str(rendered))
             second = write_asset(root, "panel-B.png", source=str(rendered))
+            for panel in (first, second):
+                with Image.open(panel) as opened:
+                    width_px, height_px = opened.size
+                sidecar_path = panel.with_suffix(panel.suffix + ".postprocess.json")
+                sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                sidecar.update({
+                    "source_label_placement": "exterior-margin",
+                    "source_label_box_px": [20, 2, 32, 12],
+                    "source_image_content_box_px": [
+                        16, 16, width_px - 16, height_px - 16,
+                    ],
+                })
+                sidecar_path.write_text(
+                    json.dumps(sidecar, ensure_ascii=False), encoding="utf-8"
+                )
             assets = root / "final_assets"
             composite = assets / "Figure_01.png"
             geometry = root / "panel_geometry.json"
@@ -291,6 +307,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
                 SKILL_ROOT / "scripts" / "recompose_panels_banded.py", composite,
                 "--inputs", first, second, "--cols", "2", "--labels", "A,B",
                 "--geometry", geometry, "--slide-box-w-in", width, "--slide-box-h-in", height,
+                "--source-label-policy", "crop-safe-margin",
             )
             self.assertEqual(recomposed.returncode, 0, msg=recomposed.stderr)
             provenance = json.loads(composite.with_suffix(".png.postprocess.json").read_text())
@@ -314,7 +331,8 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
             )
             self.assertNotEqual(unfinished.returncode, 0)
             self.assertTrue(any(
-                "missing visible native panel" in failure
+                "requires exactly panel labels" in failure
+                or "missing visible native panel" in failure
                 for failure in json.loads(unfinished.stdout)["failures"]
             ))
             labeled = root / f"{style}-native-labels.pptx"
@@ -323,6 +341,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
                 "--spec", spec_path, "--geometry", geometry, "--label-pt", "18",
             )
             self.assertEqual(stamped.returncode, 0, msg=stamped.stderr)
+            self.assertIn("added 2 native panel labels", stamped.stdout)
             figure_slide = Presentation(str(labeled)).slides[3]
             labels = {
                 shape.text_frame.text: shape.text_frame.paragraphs[0].runs[0].font.size.pt
@@ -356,10 +375,6 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
                     source_label_placement="embedded",
                     embedded_label=label,
                 )
-                with Image.open(panel) as source:
-                    image = source.convert("RGB")
-                ImageDraw.Draw(image).text((8, image.height - 20), label, fill="white")
-                image.save(panel)
                 inputs.append(panel)
 
             composite = root / "final_assets" / "Figure_01.png"
@@ -449,11 +464,21 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
     def check_emf_vector_table(self, style: str) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            manifest, _, _ = create_synthetic_inversion_fixture(root)
+            source_pdf = json.loads(manifest.read_text(encoding="utf-8"))["pdf"]
             asset = root / "final_assets" / "Table_1.emf"
             asset.parent.mkdir()
-            bundled_emf = Path(pptx.__file__).parent / "templates" / "generic-icon.emf"
-            self.assertTrue(bundled_emf.is_file())
-            shutil.copyfile(bundled_emf, asset)
+            generated = invoke(
+                SKILL_ROOT / "scripts" / "postprocess_assets.py",
+                "vector-table",
+                source_pdf,
+                asset,
+                "--page",
+                "1",
+                "--bbox",
+                "30,30,250,210",
+            )
+            self.assertEqual(generated.returncode, 0, msg=generated.stderr or generated.stdout)
             spec = full_spec()
             add_figure(spec, asset, caption="Table 1. Synthetic vector results.")
             spec_path = write_spec(root, spec)
@@ -533,7 +558,11 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
             )
             self.assertNotEqual(rejected.returncode, 0)
             report = json.loads(rejected.stdout)
-            self.assertTrue(any("missing visible native panel" in value for value in report["failures"]))
+            self.assertTrue(any(
+                "requires exactly panel labels" in value
+                or "missing visible native panel" in value
+                for value in report["failures"]
+            ))
             self.assertTrue(any(
                 check["check"] == "pptx_panel_labels" and check["level"] == "FAIL"
                 for check in report["presentation"]["deck_checks"]
@@ -751,18 +780,51 @@ class IntegratedImageRegressionTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue(any(
-                "require a readable extraction manifest" in value
+                "requires a readable extraction manifest" in value
+                or "Every slide image requires a readable extraction manifest" in value
                 for value in json.loads(result.stdout)["failures"]
             ))
 
     def test_pdf_rendered_vector_flowchart_preserves_audited_pdf_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest, _, _ = create_synthetic_inversion_fixture(root)
-            source_pdf = json.loads(manifest.read_text(encoding="utf-8"))["pdf"]
-            figure = write_asset(
-                root, "Figure_01.png", source=source_pdf, asset_type="flowchart"
+            source_pdf = root / "synthetic-vector-flowchart.pdf"
+            document = pymupdf.open()
+            page = document.new_page(width=360, height=260)
+            for rectangle in ((60, 70, 140, 115), (220, 145, 300, 190)):
+                page.draw_rect(pymupdf.Rect(*rectangle), color=(0, 0, 0), width=2)
+            page.draw_line((140, 92), (220, 167), color=(0, 0, 0), width=3)
+            page.draw_line((215, 160), (220, 167), color=(0, 0, 0), width=3)
+            page.draw_line((220, 167), (212, 166), color=(0, 0, 0), width=3)
+            page.insert_text((78, 98), "START", fontsize=12)
+            page.insert_text((246, 173), "END", fontsize=12)
+            document.save(source_pdf)
+            document.close()
+            extracted = root / "extracted"
+            prepared = invoke(
+                SKILL_ROOT / "scripts" / "extract_from_pdf.py",
+                source_pdf,
+                "--out",
+                extracted,
+                "--dpi",
+                "144",
+                "--table-dpi",
+                "144",
+                "--no-contact-sheet",
             )
+            self.assertEqual(prepared.returncode, 0, msg=prepared.stderr or prepared.stdout)
+            figure = root / "final_assets" / "Figure_01.png"
+            figure.parent.mkdir()
+            cropped = invoke(
+                SKILL_ROOT / "scripts" / "crop_vector_figure.py",
+                source_pdf,
+                figure,
+                "--page",
+                "1",
+                "--dpi",
+                "144",
+            )
+            self.assertEqual(cropped.returncode, 0, msg=cropped.stderr or cropped.stdout)
             spec = full_spec()
             add_figure(spec, figure, caption="Figure 1. PDF-rendered vector flowchart.")
             result = invoke(

@@ -12,8 +12,9 @@ Commands:
   audit-final ASSET_DIR [--spec SPEC] [--allow-table-margin a.png,b.png]
   notes-audit --spec SPEC [--require-all-notes]
 
-Figure defaults are strict: trim outer white margin to 0 px.
-Tables (--asset-type table) default to a 12 px safety margin and REFUSE to
+Final raster Figures and Tables default to an exact 16 px safety margin added
+after conservative trimming. Intermediate crops default to 0 px so downstream
+panel recomposition can work from an unpadded core. Tables REFUSE to
 write a final asset with margin < 8 px unless --intermediate is given (meaning
 a later padding/white-canvas step restores the margin). Use microcrop only for
 non-flowchart figure panels after visual review; never for tables or
@@ -26,16 +27,46 @@ import json
 import re
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageColor, ImageDraw
+from notes_quality import (
+    CJK_RE,
+    SIMPLIFIED_ONLY_RE,
+    duplicate_note_failures,
+    has_closing_takeaway,
+    note_diversity_failure,
+)
 
 
 POSTPROCESS_SUFFIX = ".postprocess.json"
 
-# Table final-asset safety margin (px). Tables must keep a stable outer white
-# margin on all four sides; never deliver a table cropped tight to text/grid.
-TABLE_SAFETY_MARGIN_PX = 12
+# Final raster-asset safety margin (px). The margin is drawn on a new canvas
+# after trimming, so it remains exact even when source content touches an edge.
+FINAL_RASTER_SAFETY_MARGIN_PX = 16
+FIGURE_SAFETY_MARGIN_PX = FINAL_RASTER_SAFETY_MARGIN_PX
+TABLE_SAFETY_MARGIN_PX = FINAL_RASTER_SAFETY_MARGIN_PX
 TABLE_MARGIN_MIN = 8
 TABLE_MARGIN_MAX = 24
+RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"}
+
+
+def _resolved(path: Path) -> Path:
+    """Resolve a path without requiring the output to exist yet."""
+    return path.expanduser().resolve(strict=False)
+
+
+def _assert_distinct_paths(source: Path, *outputs: Path) -> None:
+    """Refuse in-place image operations so a failed write cannot destroy source data."""
+    source_resolved = _resolved(source)
+    seen: set[Path] = set()
+    for output in outputs:
+        output_resolved = _resolved(output)
+        if output_resolved == source_resolved:
+            raise SystemExit(
+                f"Refusing in-place image processing: input and output are both {source_resolved}"
+            )
+        if output_resolved in seen:
+            raise SystemExit(f"Refusing duplicate output path: {output_resolved}")
+        seen.add(output_resolved)
 
 
 def content_bbox(im: Image.Image, threshold: int = 246) -> tuple[int, int, int, int]:
@@ -122,7 +153,7 @@ def find_bottom_label_cut(im: Image.Image, threshold: int = 246) -> int | None:
 # ---------------------------------------------------------------------------
 
 def detect_bg_color(arr, ring: int = 4):
-    """Most common colour in the outer `ring` of pixels (bucketed to /8)."""
+    """Representative colour of the dominant bucket in the outer pixel ring."""
     import numpy as _np
     h, w, _ = arr.shape
     ring = max(1, min(ring, h // 2, w // 2))
@@ -132,7 +163,9 @@ def detect_bg_color(arr, ring: int = 4):
     ])
     b = (s // 8) * 8
     uniq, cnt = _np.unique(b, axis=0, return_counts=True)
-    return uniq[cnt.argmax()].astype(int)
+    winning_bucket = uniq[cnt.argmax()]
+    members = s[_np.all(b == winning_bucket, axis=1)]
+    return _np.median(members, axis=0).astype(int)
 
 
 def _peel_edges(arr, bg, bg_tol: int, edge_std: int, max_artifact: int,
@@ -240,6 +273,47 @@ def bg_aware_refine(im: "Image.Image", margin: int, bg_tol: int = 26,
     return out, meta
 
 
+def add_exact_safety_padding(
+    image: "Image.Image",
+    margin: int,
+    asset_type: str,
+    detected_background: object = None,
+) -> tuple["Image.Image", dict]:
+    """Add an exact post-trim safety canvas without consuming source pixels."""
+    if margin < 0:
+        raise ValueError("margin must be non-negative")
+    unpadded_size = [image.width, image.height]
+    if asset_type == "table":
+        background = (255, 255, 255)
+    elif (
+        isinstance(detected_background, (list, tuple))
+        and len(detected_background) == 3
+    ):
+        background = tuple(max(0, min(255, int(value))) for value in detected_background)
+    else:
+        import numpy as _np
+
+        background = tuple(int(value) for value in detect_bg_color(
+            _np.asarray(image.convert("RGB"))
+        ))
+
+    if margin:
+        padded = Image.new(
+            "RGB",
+            (image.width + 2 * margin, image.height + 2 * margin),
+            background,
+        )
+        padded.paste(image, (margin, margin))
+    else:
+        padded = image
+    return padded, {
+        "safety_margin_px": margin,
+        "padding_background": list(background),
+        "unpadded_size_px": unpadded_size,
+        "padded_size_px": [padded.width, padded.height],
+    }
+
+
 def trim_image(
     input_path: Path,
     output_path: Path,
@@ -253,51 +327,131 @@ def trim_image(
     max_edge_px: int = 4,
 ) -> dict:
     im = Image.open(input_path).convert("RGB")
-    box = expand_box(content_bbox(im, threshold), im.size, margin)
+    # Refine the source background before a tight white-content crop. Running
+    # broad background refinement after the crop can mistake a meaningful dark
+    # diagram/table border newly exposed at the edge for disposable canvas.
+    refine_meta = {"bg_aware_applied": False}
+    if asset_type == "figure":
+        # Clinical figures commonly use a meaningful black/grey acquisition
+        # canvas.  Broad background peeling cannot distinguish that canvas
+        # from disposable page background, so AUTO deliberately leaves it
+        # intact and relies on the bounded (<= max_edge_px) seam cleaner below.
+        import numpy as _np
+
+        detected = tuple(int(value) for value in detect_bg_color(
+            _np.asarray(im.convert("RGB"))
+        ))
+        refine_meta["detected_bg"] = list(detected)
+        if bg_aware == "auto":
+            refine_meta["bg_aware_skip_reason"] = (
+                "clinical-figure-auto-preserves-source-canvas"
+            )
+        elif bg_aware == "on":
+            original = im
+            candidate, candidate_meta = bg_aware_refine(
+                original, 0, bg_tol=bg_tol, force=True
+            )
+            box = candidate_meta.get("content_box")
+            trims = [0, 0, 0, 0]
+            if isinstance(box, list) and len(box) == 4:
+                trims = [
+                    int(box[0]),
+                    int(box[1]),
+                    int(original.width - box[2]),
+                    int(original.height - box[3]),
+                ]
+            dark_or_colored_canvas = max(detected) < 235 or max(detected) - min(detected) > 12
+            if (
+                candidate_meta.get("bg_aware_applied")
+                and dark_or_colored_canvas
+                and max(trims) > max_edge_px
+            ):
+                refine_meta.update({
+                    "bg_aware_rejected": True,
+                    "bg_aware_skip_reason": "would-remove-clinical-canvas",
+                    "rejected_edge_trim_px": {
+                        "left": trims[0], "top": trims[1],
+                        "right": trims[2], "bottom": trims[3],
+                    },
+                })
+            else:
+                im = candidate
+                refine_meta = candidate_meta
+    elif bg_aware != "off" and asset_type != "table":
+        im, refine_meta = bg_aware_refine(
+            im,
+            0,
+            bg_tol=bg_tol,
+            force=(bg_aware == "on"),
+        )
+    elif asset_type == "table":
+        refine_meta["detected_bg"] = [255, 255, 255]
+
+    # Build an unpadded core first. Expanding a crop box inside the source does
+    # not guarantee a real margin when content already touches a source edge.
+    box = content_bbox(im, threshold)
     cropped = im.crop(box)
 
     if remove_bottom_labels:
-        if cut_bottom_px > 0:
-            cropped = cropped.crop((0, 0, cropped.width, max(1, cropped.height - cut_bottom_px)))
-        else:
-            cut = find_bottom_label_cut(cropped, threshold)
-            if cut is not None and cut > int(cropped.height * 0.55):
-                cropped = cropped.crop((0, 0, cropped.width, cut))
+        if cut_bottom_px <= 0:
+            raise SystemExit(
+                "Removing panel-label pixels requires an explicit positive "
+                "--cut-bottom-px value after visual review; automatic label "
+                "cropping is disabled."
+            )
+        if cut_bottom_px >= cropped.height:
+            raise SystemExit("--cut-bottom-px would remove the complete image")
+        cropped = cropped.crop((0, 0, cropped.width, cropped.height - cut_bottom_px))
 
     # Re-trim after optional bottom-label removal (baseline white-based result).
-    box2 = expand_box(content_bbox(cropped, threshold), cropped.size, margin)
+    box2 = content_bbox(cropped, threshold)
     result = cropped.crop(box2)
-
-    # Additive background-aware refinement (does not replace the above).
-    refine_meta = {"bg_aware_applied": False}
-    if bg_aware != "off":
-        result, refine_meta = bg_aware_refine(
-            result, margin, bg_tol=bg_tol, force=(bg_aware == "on")
-        )
 
     # A single figure does not pass through the multipanel recomposer, so run
     # the same bounded, color-safe seam check after background refinement.
-    # Tables, flowcharts, and deliberate padding must remain untouched.
-    if asset_type == "figure" and margin == 0:
+    # Tables and flowcharts remain untouched. Figure cleanup runs on the core
+    # before the safety canvas is added, so the new default margin does not
+    # disable the bounded seam protection.
+    if asset_type == "figure":
         from recompose_panels_banded import clean_panel_edges
 
         result, edge_trim_px = clean_panel_edges(result, max_edge_px=max_edge_px)
         refine_meta["edge_trim_px"] = edge_trim_px
         refine_meta["max_edge_px"] = max_edge_px
 
+    result, padding_meta = add_exact_safety_padding(
+        result,
+        margin,
+        asset_type,
+        refine_meta.get("detected_bg"),
+    )
+    refine_meta.update(padding_meta)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     result.save(output_path, quality=95)
     return {"bg_aware": bg_aware, **refine_meta}
 
 
 def labels_command(args: argparse.Namespace) -> None:
+    input_path = Path(args.input)
+    output_path = Path(args.output)
+    _assert_distinct_paths(input_path, output_path)
+    if args.cut_bottom_px <= 0:
+        raise SystemExit(
+            "The labels command no longer guesses where a label band ends. "
+            "Pass an explicit, visually verified positive --cut-bottom-px value, or use "
+            "trim/preserve when labels overlap image content."
+        )
     labels = [label.strip() for label in args.labels.split(",") if label.strip()]
+    if not labels:
+        raise SystemExit("--labels must contain at least one non-empty label")
     margin = resolve_asset_margin(args)
     asset_type = getattr(args, "asset_type", "figure")
     bg_aware = getattr(args, "bg_aware", "auto")
     bg_tol = getattr(args, "bg_tol", 26)
     refine = trim_image(
-        Path(args.input),
-        Path(args.output),
+        input_path,
+        output_path,
         margin,
         args.threshold,
         args.cut_bottom_px,
@@ -312,15 +466,16 @@ def labels_command(args: argparse.Namespace) -> None:
         threshold=args.threshold,
         cut_bottom_px=args.cut_bottom_px,
         asset_type=asset_type,
+        bg_tol=bg_tol,
         intermediate=bool(getattr(args, "intermediate", False)),
         **refine,
     )
     if asset_type == "table":
         extra["table_safety_margin_px"] = margin
     write_postprocess_meta(
-        Path(args.output),
+        output_path,
         "labels",
-        Path(args.input),
+        input_path,
         **extra,
     )
     meta_path = Path(args.output).with_suffix(Path(args.output).suffix + ".labels.json")
@@ -336,6 +491,9 @@ def microcrop_command(args: argparse.Namespace) -> None:
     after normal trimming when a dark-slide contact sheet shows thin white edge
     pixels. Do not use it for tables or flowcharts.
     """
+    input_path = Path(args.input)
+    output_path = Path(args.output)
+    _assert_distinct_paths(input_path, output_path)
     px = max(0, args.px)
     im = Image.open(args.input).convert("RGB")
     if px == 0:
@@ -346,7 +504,10 @@ def microcrop_command(args: argparse.Namespace) -> None:
         cropped = im.crop((px, px, im.width - px, im.height - px))
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     cropped.save(args.output, quality=95)
-    write_postprocess_meta(Path(args.output), "microcrop", Path(args.input), px=px)
+    write_postprocess_meta(
+        Path(args.output), "microcrop", Path(args.input),
+        px=px, asset_type="figure", intermediate=True,
+    )
     print(f"wrote {args.output} ({cropped.width}x{cropped.height}); microcrop_px={px}")
 
 
@@ -360,8 +521,24 @@ def same_width_command(args: argparse.Namespace) -> None:
         canvas = Image.new("RGB", (max_w, im.height), "white")
         canvas.paste(im, ((max_w - im.width) // 2, 0))
         out_path = out_dir / path.name
+        _assert_distinct_paths(path, out_path)
         canvas.save(out_path, quality=95)
-        write_postprocess_meta(out_path, "same-width", path, output_width=max_w)
+        source_meta = _read_sidecar(path) or {}
+        extra = {"output_width": max_w}
+        for key in (
+            "asset_type",
+            "margin",
+            "safety_margin_px",
+            "table_safety_margin_px",
+            "padding_background",
+        ):
+            if key in source_meta:
+                extra[key] = source_meta[key]
+        margin = extra.get("safety_margin_px")
+        if isinstance(margin, int) and canvas.width > 2 * margin and canvas.height > 2 * margin:
+            extra["unpadded_size_px"] = [canvas.width - 2 * margin, canvas.height - 2 * margin]
+        extra["padded_size_px"] = [canvas.width, canvas.height]
+        write_postprocess_meta(out_path, "same-width", path, **extra)
         print(f"wrote {out_path} ({canvas.width}x{canvas.height})")
 
 
@@ -372,7 +549,11 @@ def split_table_command(args: argparse.Namespace) -> None:
     should be a natural row or section boundary, never a row midpoint.
     repeat-header-y should include the table title band plus column headers.
     """
-    im = Image.open(args.input).convert("RGB")
+    input_path = Path(args.input)
+    out_a = Path(args.out_a)
+    out_b = Path(args.out_b)
+    _assert_distinct_paths(input_path, out_a, out_b)
+    im = Image.open(input_path).convert("RGB")
     x0 = max(0, args.crop_left)
     y0 = max(0, args.crop_top)
     x1 = im.width - max(0, args.crop_right)
@@ -395,20 +576,47 @@ def split_table_command(args: argparse.Namespace) -> None:
     bottom.paste(header, (0, 0))
     bottom.paste(bottom_body, (0, header.height))
 
-    max_w = max(top.width, bottom.width)
-    outputs = [(Path(args.out_a), top), (Path(args.out_b), bottom)]
-    for out_path, part in outputs:
+    margin = args.margin
+    if not TABLE_MARGIN_MIN <= margin <= TABLE_MARGIN_MAX:
+        raise SystemExit(
+            f"Final split-table outputs require --margin in "
+            f"{TABLE_MARGIN_MIN}-{TABLE_MARGIN_MAX}px (received {margin})."
+        )
+    cores = [
+        part.crop(content_bbox(part, args.threshold))
+        for part in (top, bottom)
+    ]
+    max_w = max(core.width for core in cores)
+    outputs = [(out_a, cores[0], "top"), (out_b, cores[1], "bottom")]
+    for out_path, core, part in outputs:
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        canvas = Image.new("RGB", (max_w, part.height), "white")
-        canvas.paste(part, ((max_w - part.width) // 2, 0))
+        canvas = Image.new(
+            "RGB",
+            (max_w + 2 * margin, core.height + 2 * margin),
+            "white",
+        )
+        canvas.paste(core, (margin + (max_w - core.width) // 2, margin))
         canvas.save(out_path, quality=95)
         write_postprocess_meta(
             out_path,
             "split-table",
-            Path(args.input),
+            input_path,
+            asset_type="table",
             split_y=args.split_y,
             repeat_header_y=args.repeat_header_y,
-            output_width=max_w,
+            part=part,
+            crop_left=args.crop_left,
+            crop_top=args.crop_top,
+            crop_right=args.crop_right,
+            crop_bottom=args.crop_bottom,
+            threshold=args.threshold,
+            output_width=canvas.width,
+            margin=margin,
+            safety_margin_px=margin,
+            table_safety_margin_px=margin,
+            padding_background=[255, 255, 255],
+            unpadded_size_px=[max_w, core.height],
+            padded_size_px=[canvas.width, canvas.height],
         )
         print(f"wrote {out_path} ({canvas.width}x{canvas.height})")
 
@@ -416,16 +624,28 @@ def split_table_command(args: argparse.Namespace) -> None:
 def resolve_asset_margin(args: argparse.Namespace) -> int:
     """Resolve the effective trim margin given the asset type.
 
-    Tables default to TABLE_SAFETY_MARGIN_PX and must keep a positive safety
-    margin unless the caller explicitly marks the output as an intermediate
-    crop (a later padding / white-canvas step must then restore the margin).
-    Figures and other types default to 0 (tight crop).
+    Final raster Figures and Tables default to an exact 16 px safety margin.
+    Intermediate crops default to 0 unless the caller explicitly requests a
+    margin, because panel assembly should receive an unpadded core.
     """
     asset_type = getattr(args, "asset_type", "figure")
     margin = args.margin
-    if asset_type == "table":
-        if margin is None:
+    if margin is not None and margin < 0:
+        raise SystemExit("Refusing a negative panel safety margin.")
+    intermediate = bool(getattr(args, "intermediate", False))
+    if margin is None:
+        if intermediate:
+            margin = 0
+        elif asset_type in {"figure", "flowchart"}:
+            margin = FIGURE_SAFETY_MARGIN_PX
+        elif asset_type == "table":
             margin = TABLE_SAFETY_MARGIN_PX
+        else:
+            margin = 0
+    if margin < 0:
+        raise SystemExit("Refusing a negative crop margin.")
+
+    if asset_type == "table":
         if not getattr(args, "intermediate", False) and margin < TABLE_MARGIN_MIN:
             raise SystemExit(
                 f"Refusing to write final table asset with margin={margin}. "
@@ -436,25 +656,34 @@ def resolve_asset_margin(args: argparse.Namespace) -> int:
                 f"throwaway crop that a later padding step will fix."
             )
         if margin > TABLE_MARGIN_MAX and not getattr(args, "intermediate", False):
-            print(
-                f"WARNING: table margin {margin}px exceeds recommended max "
-                f"{TABLE_MARGIN_MAX}px.",
-                file=__import__("sys").stderr,
+            raise SystemExit(
+                f"Refusing final table margin={margin}; supported range is "
+                f"{TABLE_MARGIN_MIN}-{TABLE_MARGIN_MAX}px."
             )
-    else:
-        if margin is None:
-            margin = 0
+    if (
+        asset_type in {"figure", "flowchart"}
+        and not intermediate
+        and margin != FINAL_RASTER_SAFETY_MARGIN_PX
+    ):
+        raise SystemExit(
+            f"Final {asset_type} assets require an exact "
+            f"{FINAL_RASTER_SAFETY_MARGIN_PX}px safety canvas; received {margin}. "
+            "Use --intermediate for a non-final crop."
+        )
     return margin
 
 
 def trim_command(args: argparse.Namespace) -> None:
+    input_path = Path(args.input)
+    output_path = Path(args.output)
+    _assert_distinct_paths(input_path, output_path)
     margin = resolve_asset_margin(args)
     asset_type = getattr(args, "asset_type", "figure")
     bg_aware = getattr(args, "bg_aware", "auto")
     bg_tol = getattr(args, "bg_tol", 26)
     refine = trim_image(
-        Path(args.input),
-        Path(args.output),
+        input_path,
+        output_path,
         margin,
         args.threshold,
         args.cut_bottom_px,
@@ -468,15 +697,16 @@ def trim_command(args: argparse.Namespace) -> None:
         threshold=args.threshold,
         cut_bottom_px=args.cut_bottom_px,
         asset_type=asset_type,
+        bg_tol=bg_tol,
         intermediate=bool(getattr(args, "intermediate", False)),
         **refine,
     )
     if asset_type == "table":
         extra["table_safety_margin_px"] = margin
     write_postprocess_meta(
-        Path(args.output),
+        output_path,
         "trim",
-        Path(args.input),
+        input_path,
         **extra,
     )
     applied = refine.get("bg_aware_applied")
@@ -537,6 +767,185 @@ def _read_sidecar(image_path: Path) -> dict | None:
         return None
 
 
+def _valid_rgb(value: object) -> bool:
+    if isinstance(value, str):
+        return bool(re.fullmatch(r"#?[0-9A-Fa-f]{6}", value.strip()))
+    return (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(isinstance(item, int) and 0 <= item <= 255 for item in value)
+    )
+
+
+def _rgb_tuple(value: object) -> tuple[int, int, int] | None:
+    if isinstance(value, str) and re.fullmatch(r"#?[0-9A-Fa-f]{6}", value.strip()):
+        raw = value.strip().lstrip("#")
+        return tuple(int(raw[index:index + 2], 16) for index in (0, 2, 4))
+    if (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(isinstance(item, int) and not isinstance(item, bool) and 0 <= item <= 255 for item in value)
+    ):
+        return tuple(value)
+    return None
+
+
+def _padding_pixels_match(
+    image: Image.Image, margin: int, background: tuple[int, int, int]
+) -> bool:
+    """Verify that all four declared safety bands physically exist in the raster."""
+    if "A" in image.getbands() or "transparency" in image.info:
+        alpha = image.convert("RGBA").getchannel("A")
+        if alpha.getextrema() != (255, 255):
+            return False
+    rgb = image.convert("RGB")
+    if margin <= 0 or rgb.width <= 2 * margin or rgb.height <= 2 * margin:
+        return False
+    bands = (
+        rgb.crop((0, 0, rgb.width, margin)),
+        rgb.crop((0, rgb.height - margin, rgb.width, rgb.height)),
+        rgb.crop((0, margin, margin, rgb.height - margin)),
+        rgb.crop((rgb.width - margin, margin, rgb.width, rgb.height - margin)),
+    )
+    lossy = str(image.format or "").upper() in {"JPEG", "WEBP"}
+    tolerance = 24 if lossy else 3
+    total = 0
+    mismatched = 0
+    for band in bands:
+        raw = band.tobytes()
+        for offset in range(0, len(raw), 3):
+            pixel = raw[offset:offset + 3]
+            total += 1
+            if max(abs(pixel[channel] - background[channel]) for channel in range(3)) > tolerance:
+                mismatched += 1
+    allowed_fraction = 0.03 if lossy else 0.0
+    return total > 0 and mismatched / total <= allowed_fraction
+
+
+def _core_has_visible_content(
+    image: Image.Image, margin: int, background: tuple[int, int, int]
+) -> bool:
+    if margin <= 0 or image.width <= 2 * margin or image.height <= 2 * margin:
+        return False
+    core = image.convert("RGB").crop(
+        (margin, margin, image.width - margin, image.height - margin)
+    )
+    raw = core.tobytes()
+    different = 0
+    for offset in range(0, len(raw), 3):
+        pixel = raw[offset:offset + 3]
+        if max(abs(pixel[channel] - background[channel]) for channel in range(3)) > 8:
+            different += 1
+    minimum = max(16, int(core.width * core.height * 0.0005))
+    return different >= minimum
+
+
+def validate_final_sidecar(image_path: Path, sidecar: dict) -> list[str]:
+    """Validate the minimum evidence required for a final raster asset."""
+    failures: list[str] = []
+    prefix = f"final raster {image_path.name}"
+    if "intermediate" in sidecar and not isinstance(sidecar.get("intermediate"), bool):
+        failures.append(f"{prefix} intermediate must be a JSON boolean")
+    elif sidecar.get("intermediate") is True:
+        failures.append(f"{prefix} is marked intermediate and cannot be used in a deck")
+
+    command = sidecar.get("command")
+    if not isinstance(command, str) or not command.strip():
+        failures.append(f"{prefix} command must be a non-empty string")
+
+    source = sidecar.get("source")
+    source_inputs = sidecar.get("source_inputs")
+    if not (
+        isinstance(source, str) and source.strip()
+        or isinstance(source_inputs, list)
+        and source_inputs
+        and all(isinstance(item, str) and item.strip() for item in source_inputs)
+    ):
+        failures.append(f"{prefix} lacks a non-empty source/source_inputs provenance field")
+
+    asset_type = sidecar.get("asset_type")
+    if asset_type not in {"figure", "table", "flowchart"}:
+        failures.append(f"{prefix} has invalid asset_type={asset_type!r}")
+
+    margin = sidecar.get("safety_margin_px")
+    if not isinstance(margin, int) or isinstance(margin, bool) or margin < 0:
+        failures.append(f"{prefix} safety_margin_px must be a non-negative integer")
+        margin = None
+    elif asset_type in {"figure", "flowchart"} and margin != FINAL_RASTER_SAFETY_MARGIN_PX:
+        failures.append(
+            f"{prefix} requires exact {FINAL_RASTER_SAFETY_MARGIN_PX}px safety margin; "
+            f"found {margin}"
+        )
+    elif asset_type == "table" and not TABLE_MARGIN_MIN <= margin <= TABLE_MARGIN_MAX:
+        failures.append(
+            f"{prefix} table safety margin must be {TABLE_MARGIN_MIN}-{TABLE_MARGIN_MAX}px; "
+            f"found {margin}"
+        )
+
+    background = sidecar.get("padding_background")
+    if not _valid_rgb(background):
+        failures.append(f"{prefix} padding_background must be #RRGGBB or [r,g,b]")
+    if asset_type == "table" and _rgb_tuple(background) != (255, 255, 255):
+        failures.append(f"{prefix} table padding_background must be white")
+
+    unpadded = sidecar.get("unpadded_size_px")
+    padded = sidecar.get("padded_size_px")
+    dimension_validity: dict[str, bool] = {}
+    for field, value in (("unpadded_size_px", unpadded), ("padded_size_px", padded)):
+        valid = (
+            isinstance(value, list)
+            and len(value) == 2
+            and all(isinstance(item, int) and not isinstance(item, bool) and item > 0 for item in value)
+        )
+        dimension_validity[field] = valid
+        if not valid:
+            failures.append(f"{prefix} {field} must be two positive integers")
+
+    declared_margin = sidecar.get("margin")
+    if not isinstance(declared_margin, int) or isinstance(declared_margin, bool):
+        failures.append(f"{prefix} margin must be an integer")
+    elif margin is not None and declared_margin != margin:
+        failures.append(f"{prefix} margin must equal safety_margin_px")
+
+    background_rgb = _rgb_tuple(background)
+    try:
+        with Image.open(image_path) as image:
+            actual = [image.width, image.height]
+            pixel_canvas_ok = (
+                margin is not None
+                and background_rgb is not None
+                and _padding_pixels_match(image, margin, background_rgb)
+            )
+            core_content_ok = (
+                margin is not None
+                and background_rgb is not None
+                and _core_has_visible_content(image, margin, background_rgb)
+            )
+    except OSError as error:
+        failures.append(f"{prefix} cannot be decoded: {error}")
+        return failures
+    if dimension_validity["padded_size_px"] and padded != actual:
+        failures.append(f"{prefix} padded_size_px={padded} does not match actual size={actual}")
+    if (
+        margin is not None
+        and dimension_validity["unpadded_size_px"]
+        and dimension_validity["padded_size_px"]
+        and padded != [unpadded[0] + 2 * margin, unpadded[1] + 2 * margin]
+    ):
+        failures.append(
+            f"{prefix} size arithmetic is inconsistent with safety_margin_px={margin}"
+        )
+    if asset_type == "table" and sidecar.get("table_safety_margin_px") != margin:
+        failures.append(f"{prefix} table_safety_margin_px must equal safety_margin_px")
+    if not pixel_canvas_ok:
+        failures.append(
+            f"{prefix} actual outer pixels do not contain the declared safety canvas/background"
+        )
+    if not core_content_ok:
+        failures.append(f"{prefix} unpadded core has no visible content distinct from its background")
+    return failures
+
+
 _PANEL_FRAGMENT_RE = re.compile(r"(_panel[_\-]?[a-z0-9]+|panel_[a-z0-9]+)\.png$", re.I)
 _FIG_NUM_RE = re.compile(r"\bfig(?:ure)?\s*\.?\s*([0-9]+)", re.I)
 
@@ -564,12 +973,15 @@ def audit_command(args: argparse.Namespace) -> None:
         pairs = [
             (sl, p)
             for sl, p in spec_slides_with_images(Path(args.spec).resolve())
-            if p.suffix.lower() == ".png"
+            if p.suffix.lower() in RASTER_SUFFIXES
         ]
         images = [p for _, p in pairs]
         slides = [sl for sl, _ in pairs]
     else:
-        images = sorted(asset_dir.glob("*.png"))
+        images = sorted(
+            path for path in asset_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in RASTER_SUFFIXES
+        )
         pairs = [({}, p) for p in images]
 
     failures = []
@@ -583,21 +995,25 @@ def audit_command(args: argparse.Namespace) -> None:
         sidecar = _read_sidecar(image_path)
         if args.require_postprocess and sidecar is None:
             failures.append(f"missing postprocess sidecar: {postprocess_meta_path(image_path)}")
+        if sidecar is not None:
+            failures.extend(validate_final_sidecar(image_path, sidecar))
 
         # Table safety-margin gate.
         if sidecar is not None and _looks_like_table(image_path, sidecar):
             cmd = sidecar.get("command")
-            margin = sidecar.get("margin", 0)
+            margin = sidecar.get("margin", sidecar.get("safety_margin_px"))
             documented = (
                 image_path.name in allow_table_margin
                 or _runmanifest_mentions(asset_dir, image_path.name)
             )
-            if cmd in {"trim", "labels"} and isinstance(margin, int) \
-                    and margin < TABLE_MARGIN_MIN and not documented:
+            if cmd in {"trim", "labels"} and (
+                not isinstance(margin, int)
+                or not TABLE_MARGIN_MIN <= margin <= TABLE_MARGIN_MAX
+            ) and not documented:
                 failures.append(
-                    f"table asset {image_path.name} has {cmd} margin={margin} "
-                    f"(< {TABLE_MARGIN_MIN}px safety margin) and no later "
-                    f"padding/RUN_MANIFEST exception"
+                    f"table asset {image_path.name} has {cmd} margin={margin!r}; "
+                    f"expected {TABLE_MARGIN_MIN}-{TABLE_MARGIN_MAX}px and no "
+                    f"documented exception was found"
                 )
 
         # Multi-panel figure geometry gate (spec-driven only).
@@ -672,6 +1088,17 @@ _NOTE_EMOJI_RANGES = (
     (0x1F000, 0x1F0FF),
     (0xFE00, 0xFE0F),    # variation selectors
 )
+_NOTE_CJK_RE = CJK_RE
+_NOTE_SIMPLIFIED_ONLY_RE = SIMPLIFIED_ONLY_RE
+_MIN_NOTE_CJK = {
+    "title": 12,
+    "outline": 20,
+    "part": 12,
+    "content": 20,
+    "figure": 20,
+    "references": 16,
+    "thanks": 12,
+}
 
 
 def _count_emoji(text: str) -> int:
@@ -683,13 +1110,17 @@ def _count_emoji(text: str) -> int:
     return total
 
 
+def _note_diversity_failure(text: str) -> str | None:
+    return note_diversity_failure(text)
+
+
 def _referenced_panel_letters(notes: str) -> set[str]:
-    # Matches 【A 圖】, 【A: ...】, 【A】, "panel A", "Table 1A"
+    # Matches 【A 圖】, 【A: ...】, 【1：...】, and "panel A/1".
     import re as _re
     letters = set()
-    for m in _re.finditer(r"【\s*([A-Fa-f])\b", notes):
+    for m in _re.finditer(r"【\s*([A-Za-z]|\d+)\s*(?:[圖图]|[:：])", notes):
         letters.add(m.group(1).upper())
-    for m in _re.finditer(r"\bpanel\s*([A-Fa-f])\b", notes):
+    for m in _re.finditer(r"\bpanel\s*([A-Za-z]|\d+)\b", notes, _re.IGNORECASE):
         letters.add(m.group(1).upper())
     return letters
 
@@ -859,6 +1290,11 @@ def recompose_panels_command(args: argparse.Namespace) -> None:
     For figures on a dark slide, pass --bg matching the slide background
     (e.g. --bg '#061428') so gaps do not appear as white lines.
     """
+    output_path = Path(args.output)
+    if args.composite:
+        _assert_distinct_paths(Path(args.composite), output_path)
+    for input_name in args.inputs:
+        _assert_distinct_paths(Path(input_name), output_path)
     threshold = args.threshold
     if args.composite:
         if not (args.rows and args.cols):
@@ -889,6 +1325,11 @@ def recompose_panels_command(args: argparse.Namespace) -> None:
     rows = (len(panels) + cols - 1) // cols
     gap = args.gap
     margin = args.margin
+    if margin != FINAL_RASTER_SAFETY_MARGIN_PX:
+        raise SystemExit(
+            f"Final recomposed figures require an exact "
+            f"{FINAL_RASTER_SAFETY_MARGIN_PX}px safety margin; received {margin}."
+        )
 
     # 3) uniform cell size -> aligned grid, all four outer edges flush
     cell_w = args.panel_width or int(round(_stats.median(im.width for im in panels)))
@@ -912,15 +1353,28 @@ def recompose_panels_command(args: argparse.Namespace) -> None:
                        "x": x, "y": y, "w": im.width, "h": im.height,
                        "right_x_frac": round((x + im.width) / canvas_w, 4)})
 
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(args.output, quality=95)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, quality=95)
+    padding_rgb = ImageColor.getrgb(args.bg)[:3]
+    padding_hex = "#" + "".join(f"{channel:02X}" for channel in padding_rgb)
     write_postprocess_meta(
         Path(args.output), "recompose-panels",
         Path(args.composite) if args.composite else None,
         asset_type="figure",
+        input_mode="composite" if args.composite else "inputs",
         source_inputs=[str(Path(path).expanduser().resolve()) for path in args.inputs]
         if args.inputs else [],
         panels=len(cells), rows=rows, cols=cols, gap=gap, margin=margin,
+        safety_margin_px=margin, padding_background=padding_hex,
+        unpadded_size_px=[canvas_w - 2 * margin, canvas_h - 2 * margin],
+        padded_size_px=[canvas_w, canvas_h],
+        threshold=args.threshold,
+        panel_width=args.panel_width,
+        panel_height=args.panel_height,
+        edge_white_thr=args.edge_white_thr,
+        edge_white_frac=args.edge_white_frac,
+        edge_light_thr=args.edge_light_thr,
+        edge_light_frac=args.edge_light_frac,
         inset=args.inset, fit=args.fit, cell_w=cell_w, cell_h=cell_h,
         bg=args.bg, panel_frame=args.panel_frame,
         panel_frame_color=(args.panel_frame_color or args.bg), panel_boxes=boxes,
@@ -939,62 +1393,77 @@ def vector_table_command(args: argparse.Namespace) -> None:
     put in the deck spec as 'image_aspect'; build_deck places the EMF on a white
     card on the dark slide.
     """
-    import subprocess, tempfile
+    import vector_table
+
     try:
-        import pymupdf as fitz
-    except ImportError as e:
-        raise SystemExit("PyMuPDF required: pip install pymupdf") from e
-    x0, y0, x1, y1 = [float(v) for v in args.bbox.split(",")]
-    doc = fitz.open(args.pdf)
-    pg = doc[args.page - 1]
-    X0 = max(0, x0 - args.pad_x); X1 = min(pg.rect.width, x1 + args.pad_x)
-    Y0 = max(0, y0 - args.pad_top); Y1 = min(pg.rect.height, y1 + args.pad_bottom)
-    pg.set_cropbox(fitz.Rect(X0, Y0, X1, Y1))
-    out = Path(args.output)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as td:
-        svg_text = pg.get_svg_image(matrix=fitz.Matrix(1, 1))
-        # Insert a full-canvas white background rect right after the <svg ...> tag.
-        # LibreOffice's SVG->EMF export auto-trims surrounding whitespace, which
-        # was clipping the table title at the top edge; a full-area white rect is
-        # treated as content, so the margins (and the title) are preserved, and
-        # the EMF gets a proper white background.
-        import re as _re
-        m = _re.search(r"<svg\b[^>]*>", svg_text)
-        if m:
-            insert = '<rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>'
-            svg_text = svg_text[:m.end()] + insert + svg_text[m.end():]
-        svg = Path(td) / (out.stem + ".svg")
-        svg.write_text(svg_text, encoding="utf-8")
-        soffice = args.soffice
-        subprocess.run([soffice, "--headless", "--convert-to", "emf",
-                        "--outdir", td, str(svg)],
-                       check=True, capture_output=True)
-        emf = Path(td) / (out.stem + ".emf")
-        if not emf.exists():
-            raise SystemExit("EMF conversion failed (is LibreOffice installed?)")
-        out.write_bytes(emf.read_bytes())
-    aspect = round((X1 - X0) / (Y1 - Y0), 4)
-    print(f"wrote {out} (vector EMF); image_aspect={aspect}")
-    print(f'spec: "image": "{out.name}", "image_aspect": {aspect}')
+        bbox = [float(value) for value in args.bbox.split(",")]
+        if len(bbox) != 4:
+            raise ValueError
+    except ValueError as error:
+        raise SystemExit("--bbox must contain exactly x0,y0,x1,y1") from error
+    out = Path(args.output).expanduser().resolve()
+    try:
+        metadata = vector_table.generate_vector_table(
+            Path(args.pdf),
+            out,
+            page=args.page,
+            requested_bbox=bbox,
+            pad_x=args.pad_x,
+            pad_top=args.pad_top,
+            pad_bottom=args.pad_bottom,
+            soffice=args.soffice,
+        )
+    except (OSError, ValueError, RuntimeError) as error:
+        raise SystemExit(str(error)) from error
+    aspect = metadata["image_aspect"]
+    print(f"wrote {out} (vector EMF); image_aspect={aspect:.8f}")
+    print(f'spec: "image": "{out.name}", "image_aspect": {aspect:.8f}')
 
 
 def notes_audit_command(args: argparse.Namespace) -> None:
-    spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
-    slides = spec.get("slides", [])
+    spec_path = Path(args.spec).expanduser().resolve()
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    if not isinstance(spec, dict) or not isinstance(spec.get("slides"), list):
+        raise SystemExit("notes specification must be an object containing a slides list")
+    slides = spec["slides"]
     failures = []
     warnings = []
 
     notes_slides = 0
     total_emoji = 0
+    note_entries: list[tuple[int, str]] = []
     for idx, slide in enumerate(slides, start=1):
-        notes = slide.get("notes") or ""
-        if not notes.strip():
-            if args.require_all_notes:
-                failures.append(f"slide {idx} ({slide.get('type')}) has no notes")
+        if not isinstance(slide, dict):
+            failures.append(f"slide {idx} must be an object")
             continue
+        raw_notes = slide.get("notes")
+        if not isinstance(raw_notes, str):
+            failures.append(f"slide {idx} ({slide.get('type')}) notes must be a string")
+            continue
+        notes = raw_notes
+        if not notes.strip():
+            failures.append(f"slide {idx} ({slide.get('type')}) has no notes")
+            continue
+        note_entries.append((idx, notes))
         notes_slides += 1
-        total_emoji += _count_emoji(notes)
+        emoji_count = _count_emoji(notes)
+        total_emoji += emoji_count
+        slide_type = str(slide.get("type", ""))
+        cjk_count = len(_NOTE_CJK_RE.findall(notes))
+        minimum = _MIN_NOTE_CJK.get(slide_type, 12)
+        if cjk_count < minimum:
+            failures.append(
+                f"slide {idx} ({slide_type}) notes are not substantive: "
+                f"{cjk_count} CJK characters; at least {minimum} required"
+            )
+        if diversity_failure := _note_diversity_failure(notes):
+            failures.append(f"slide {idx} notes contain {diversity_failure}")
+        if _NOTE_SIMPLIFIED_ONLY_RE.search(notes):
+            failures.append(f"slide {idx} notes contain Simplified-Chinese-only forms")
+        if emoji_count == 0:
+            failures.append(f"slide {idx} notes contain no structural emoji marker")
+        if slide_type == "content" and not has_closing_takeaway(notes):
+            failures.append(f"slide {idx} content notes need a closing takeaway marker")
 
         if "**" in notes:
             warnings.append(
@@ -1004,21 +1473,31 @@ def notes_audit_command(args: argparse.Namespace) -> None:
 
         # Figure/table panel-mention check.
         if slide.get("type") == "figure":
-            labels = {str(l).upper() for l in (slide.get("panel_labels") or [])}
-            if labels:
-                referenced = _referenced_panel_letters(notes)
-                ghost = referenced - labels
-                if ghost:
-                    failures.append(
-                        f"slide {idx}: notes reference panel(s) "
-                        f"{sorted(ghost)} not in panel_labels {sorted(labels)}"
-                    )
+            labels = {str(l).strip().upper() for l in (slide.get("panel_labels") or []) if str(l).strip()}
+            image_value = slide.get("image")
+            if isinstance(image_value, str) and image_value.strip():
+                image_path = Path(image_value).expanduser()
+                if not image_path.is_absolute():
+                    image_path = spec_path.parent / image_path
+                sidecar = _read_sidecar(image_path.resolve()) or {}
+                for key in ("labels", "embedded_labels", "native_label_values"):
+                    value = sidecar.get(key)
+                    if isinstance(value, list):
+                        labels.update(str(item).strip().upper() for item in value if str(item).strip())
+            referenced = _referenced_panel_letters(notes)
+            ghost = referenced - labels
+            missing = labels - referenced
+            if ghost:
+                failures.append(
+                    f"slide {idx}: notes reference panel(s) "
+                    f"{sorted(ghost)} not present in visible label metadata {sorted(labels)}"
+                )
+            if missing:
+                failures.append(
+                    f"slide {idx}: notes do not describe visible panel(s) {sorted(missing)}"
+                )
 
-    if notes_slides > 0 and total_emoji == 0:
-        failures.append(
-            "notes exist on slides but contain zero lead/scan emojis "
-            "(notes must use emoji scaffolding)"
-        )
+    failures.extend(duplicate_note_failures(note_entries))
 
     for w in warnings:
         print(f"warning: {w}")
@@ -1043,8 +1522,8 @@ def main() -> None:
     trim.add_argument("input")
     trim.add_argument("output")
     trim.add_argument("--margin", type=int, default=None,
-                      help="Outer white margin px. Default 0 for figures, "
-                           "12 for --asset-type table.")
+                      help="Exact post-trim safety margin in px. Default 16 for "
+                           "final figures/tables and 0 for intermediate crops.")
     trim.add_argument("--asset-type", choices=["figure", "table", "flowchart", "unknown"],
                       default="figure",
                       help="Asset class. 'table' enforces an 8-24px safety margin.")
@@ -1069,8 +1548,8 @@ def main() -> None:
     labels.add_argument("output")
     labels.add_argument("--labels", required=True, help="Comma-separated labels, e.g. A,B,C,D")
     labels.add_argument("--margin", type=int, default=None,
-                        help="Outer white margin px. Default 0 for figures, "
-                             "12 for --asset-type table.")
+                        help="Exact post-trim safety margin in px. Default 16 for "
+                             "final figures/tables and 0 for intermediate crops.")
     labels.add_argument("--asset-type", choices=["figure", "table", "flowchart", "unknown"],
                         default="figure")
     labels.add_argument("--intermediate", action="store_true")
@@ -1110,8 +1589,9 @@ def main() -> None:
                                 "--inputs.")
     recompose.add_argument("--gap", type=int, default=18,
                            help="Uniform gap in px between panels (default 18).")
-    recompose.add_argument("--margin", type=int, default=0,
-                           help="Outer margin in px around the grid (default 0).")
+    recompose.add_argument("--margin", type=int, default=FINAL_RASTER_SAFETY_MARGIN_PX,
+                           help="Outer safety margin in px around the grid "
+                                "(default 16).")
     recompose.add_argument("--panel-height", type=int, default=0,
                            help="Force the uniform cell height in px; default is "
                                 "the median trimmed panel height.")
@@ -1161,6 +1641,10 @@ def main() -> None:
     split.add_argument("--crop-top", type=int, default=0)
     split.add_argument("--crop-right", type=int, default=0)
     split.add_argument("--crop-bottom", type=int, default=0)
+    split.add_argument("--margin", type=int, default=TABLE_SAFETY_MARGIN_PX,
+                       help="Exact outer white safety margin on each output "
+                            "part (default 16).")
+    split.add_argument("--threshold", type=int, default=246)
     split.set_defaults(func=split_table_command)
 
     audit = sub.add_parser("audit-final")

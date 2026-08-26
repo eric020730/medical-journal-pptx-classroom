@@ -60,15 +60,22 @@ def choose_python() -> Path:
     if current_environment_ready():
         return Path(sys.executable).absolute()
     raise RuntimeError(
-        "The integrated skill Python runtime is not installed. Run "
-        "install-global.py install, or set MEDICAL_JOURNAL_PPTX_PYTHON "
-        "to a Python 3.11–3.13 environment containing the skill requirements."
+        "The integrated skill Python runtime is unavailable. Create a Python "
+        "3.11–3.13 virtual environment, install this skill's requirements.txt, "
+        "then set MEDICAL_JOURNAL_PPTX_PYTHON to that environment's Python executable."
     )
 
 
 def main(argv: list[str] | None = None) -> int:
-    executable = choose_python()
     arguments = list(sys.argv[1:] if argv is None else argv)
+    try:
+        executable = choose_python()
+    except RuntimeError:
+        # The doctor command itself uses only the standard library and should
+        # remain available specifically when dependencies are missing.
+        if arguments[:1] != ["doctor"]:
+            raise
+        executable = Path(sys.executable).absolute()
     command = [str(executable), str(SKILL_ROOT / "scripts" / "workflow.py"), *arguments]
     environment = dict(os.environ)
     environment.setdefault("PYTHONUTF8", "1")

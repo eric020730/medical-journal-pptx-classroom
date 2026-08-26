@@ -151,11 +151,17 @@ def _solve_label_px(target_in, box_w_in, box_h_in, W, row_h_sum, nrows, gap):
 def recompose(panels, cols, labels, font_size, label_rgb, bg_rgb, gap,
               row_height, equal_row_width, trim_thr, trim_frac,
               target_label_in=None, box_w_in=12.10, box_h_in=4.85,
-              panel_frame=3, frame_rgb=None, bold=False):
+              panel_frame=0, frame_rgb=None, bold=False):
+    if not panels:
+        raise ValueError("at least one panel is required")
+    if labels is not None and len(labels) != len(panels):
+        raise ValueError(
+            f"label count ({len(labels)}) must equal panel count ({len(panels)})"
+        )
     if frame_rgb is None:
         frame_rgb = bg_rgb
     panels = [edge_trim(p, trim_thr, trim_frac) for p in panels]
-    # Cover residual light-grey/film rims with a bg-colored frame (default on).
+    # A frame overwrites source pixels and therefore remains explicit-only.
     panels = [frame_panel(p, panel_frame, frame_rgb) for p in panels]
 
     rows = [panels[i:i + cols] for i in range(0, len(panels), cols)]
@@ -204,6 +210,7 @@ def recompose(panels, cols, labels, font_size, label_rgb, bg_rgb, gap,
     ch = sum(row_h) + len(norm) * label_h + gap * (len(norm) - 1)
     canvas = Image.new("RGB", (cw, ch), bg_rgb)
     d = ImageDraw.Draw(canvas)
+    boxes = []
 
     y = 0
     for row, rlabs, rw, H in zip(norm, rowlabs, row_w, row_h):
@@ -211,6 +218,7 @@ def recompose(panels, cols, labels, font_size, label_rgb, bg_rgb, gap,
         x = 0 if equal_row_width and len(norm) > 1 else (cw - rw) // 2
         for p, lab in zip(row, rlabs):
             canvas.paste(p, (x, y))
+            boxes.append({"x": x, "y": y, "w": p.width, "h": p.height})
             if lab:
                 tb = d.textbbox((0, 0), lab, font=font)
                 tw = tb[2] - tb[0]
@@ -219,7 +227,7 @@ def recompose(panels, cols, labels, font_size, label_rgb, bg_rgb, gap,
                        lab, font=font, fill=label_rgb)
             x += p.width + gap
         y += H + label_h + gap
-    return canvas
+    return canvas, boxes
 
 
 def main():
@@ -254,10 +262,10 @@ def main():
                     help="Disable equal row width; center each row instead.")
     ap.add_argument("--edge-white-thr", type=int, default=238)
     ap.add_argument("--edge-white-frac", type=float, default=0.72)
-    ap.add_argument("--panel-frame", type=int, default=3,
+    ap.add_argument("--panel-frame", type=int, default=0,
                     help="Width (px) of a bg-colored frame painted over each "
                          "panel's outer rim to hide light-grey/film border "
-                         "lines that near-white edge-trim leaves. Default 3; "
+                         "lines that near-white edge-trim leaves. Default 0; "
                          "use 0 to disable.")
     ap.add_argument("--panel-frame-color", default=None,
                     help="Frame color (default = --bg).")
@@ -265,20 +273,46 @@ def main():
                     default=False,
                     help="Render A/B/C/D labels in bold. Default is non-bold "
                          "(regular weight).")
+    ap.add_argument("--safety-margin-px", type=int, default=16,
+                    help="Exact final outer safety canvas in px (must be 16).")
     a = ap.parse_args()
 
+    output = Path(a.output).expanduser().resolve(strict=False)
+    resolved_inputs = [Path(path).expanduser().resolve(strict=False) for path in a.inputs]
+    if output in resolved_inputs:
+        ap.error("output must differ from every input panel")
+    if a.safety_margin_px != 16:
+        ap.error("final aligned composites require --safety-margin-px 16")
+    if a.cols is not None and not 1 <= a.cols <= len(a.inputs):
+        ap.error("--cols must be between 1 and the number of input panels")
+    if a.panel_frame < 0:
+        ap.error("--panel-frame must be non-negative")
     panels = [Image.open(p) for p in a.inputs]
     cols = a.cols or len(panels)
     labels = [s.strip() for s in a.labels.split(",") if s.strip()] or None
-    out = recompose(panels, cols, labels, a.font_size, _hex(a.label_color),
-                    _hex(a.bg), a.gap, a.row_height, a.equal_row_width,
-                    a.edge_white_thr, a.edge_white_frac,
-                    target_label_in=a.label_screen_height_in,
-                    box_w_in=a.slide_box_w_in, box_h_in=a.slide_box_h_in,
-                    panel_frame=a.panel_frame,
-                    frame_rgb=_hex(a.panel_frame_color) if a.panel_frame_color else None,
-                    bold=a.label_bold)
-    out.save(a.output)
+    if labels is not None and len(labels) != len(panels):
+        ap.error(f"label count ({len(labels)}) must equal panel count ({len(panels)})")
+    core, panel_boxes = recompose(
+        panels, cols, labels, a.font_size, _hex(a.label_color),
+        _hex(a.bg), a.gap, a.row_height, a.equal_row_width,
+        a.edge_white_thr, a.edge_white_frac,
+        target_label_in=a.label_screen_height_in,
+        box_w_in=a.slide_box_w_in, box_h_in=a.slide_box_h_in,
+        panel_frame=a.panel_frame,
+        frame_rgb=_hex(a.panel_frame_color) if a.panel_frame_color else None,
+        bold=a.label_bold,
+    )
+    for box in panel_boxes:
+        box["x"] += a.safety_margin_px
+        box["y"] += a.safety_margin_px
+    out = Image.new(
+        "RGB",
+        (core.width + 2 * a.safety_margin_px, core.height + 2 * a.safety_margin_px),
+        _hex(a.bg),
+    )
+    out.paste(core, (a.safety_margin_px, a.safety_margin_px))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    out.save(output)
     sidecar = Path(a.output + ".postprocess.json")
     sidecar.write_text(
         json.dumps(
@@ -287,6 +321,31 @@ def main():
                 "asset_type": "figure",
                 "labels": labels or [],
                 "source_inputs": [str(Path(path).expanduser().resolve()) for path in a.inputs],
+                "panel_boxes_px": panel_boxes,
+                "cols": cols,
+                "font_size": a.font_size,
+                "label_screen_height_in": a.label_screen_height_in,
+                "slide_box_w_in": a.slide_box_w_in,
+                "slide_box_h_in": a.slide_box_h_in,
+                "label_color": a.label_color,
+                "bg": a.bg,
+                "gap": a.gap,
+                "row_height": a.row_height,
+                "equal_row_width": a.equal_row_width,
+                "edge_white_thr": a.edge_white_thr,
+                "edge_white_frac": a.edge_white_frac,
+                "panel_frame": a.panel_frame,
+                "panel_frame_color": a.panel_frame_color,
+                "label_bold": a.label_bold,
+                "margin": a.safety_margin_px,
+                "safety_margin_px": a.safety_margin_px,
+                "padding_background": "#" + "".join(
+                    f"{channel:02X}" for channel in _hex(a.bg)
+                ),
+                "unpadded_size_px": [core.width, core.height],
+                "padded_size_px": [out.width, out.height],
+                "panel_frame_px": a.panel_frame,
+                "burned_in_labels": bool(labels),
             },
             ensure_ascii=False,
             indent=2,
