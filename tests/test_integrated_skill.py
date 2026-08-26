@@ -835,6 +835,13 @@ class StandaloneReleaseTests(unittest.TestCase):
             self.assertTrue(Path(payload["checksum_file"]).is_file())
             with zipfile.ZipFile(destination) as archive:
                 entries = archive.namelist()
+                version = (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+                expected_root = f"{SKILL_NAME}-{version}/"
+                self.assertTrue(entries)
+                self.assertTrue(
+                    all(name.startswith(expected_root) for name in entries),
+                    msg=f"release entries must use {expected_root}",
+                )
                 self.assertTrue(any(name.endswith("/skill/SKILL.md") for name in entries))
                 self.assertTrue(any(name.endswith("/skill/scripts/build_deck_nice.py") for name in entries))
                 self.assertTrue(any(name.endswith("/skill/scripts/qa_gate.py") for name in entries))

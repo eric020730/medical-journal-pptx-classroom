@@ -3,7 +3,7 @@
   "classroom_version": "4.0.0",
   "skill_name": "medical-journal-to-pptx-classroom",
   "integrated_skill_name": "medical-journal-to-pptx-integrated",
-  "integrated_skill_version": "v4.0.0",
+  "integrated_skill_version": "v4.0.1",
   "classroom_skill_version": "v0.2.38-bg-aware-trim",
   "python_minimum": "3.11",
   "python_maximum_tested": "3.13",
