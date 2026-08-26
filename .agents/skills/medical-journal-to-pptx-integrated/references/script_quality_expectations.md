@@ -39,16 +39,35 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       count against the actual slide box, panel proportions, gutters, and
       native-label bands. It maximizes the smallest displayed panel and keeps
       source reading order; explicit `--cols` remains a manual override.
+- [x] Embedded source labels remain untouched and suppress both native-label
+      geometry and label bands. Exterior labels are cropped only after their
+      surrounding margin is proven uniform; unsafe margins preserve the source.
+- [x] Exact-source panel crops containing a solid corner overwrite are rejected
+      instead of silently covering anatomy, annotations, or clinical overlays.
+- [x] White, gray, and anti-aliased achromatic edge seams are trimmed by at most
+      four pixels per side by default for both standalone raster figures and
+      recomposed panels. A uniform dark clinical canvas stops the trim sequence,
+      so a preceding one-pixel PDF object-boundary hairline is removed instead
+      of being retained by the safety cap; dark borders facing brighter content,
+      colored scales, bright edge-touching content, tables, flowcharts, and
+      thicker ambiguous light regions are preserved.
+- [x] Exact crops sharing an audited source automatically reconcile a rough row
+      boundary only when it cuts a verified boxed embedded label; independent
+      overlap groups remain separate, linked panels share one corrected seam,
+      clinical color scales block unsafe shifts, and source/effective crop boxes
+      plus bounded shift depths remain auditable.
 - [x] Recomposed-figure sidecars preserve every recursive `source_inputs` path
-      and record the selected grid plus reproducible candidate measurements.
+      and record the selected grid, reproducible candidate measurements, source
+      label policy, overwritten-pixel count, bounded row-seam adjustments,
+      and per-side edge-trim depths.
 
 ## Speaker-note validation
 
 - [x] `postprocess_assets.py notes-audit --spec <spec>` counts notes-bearing
       slides and note emoji.
 - [x] Fails if slides have notes but the total note emoji count is zero.
-- [x] Fails if figure/table notes reference panel letters not present in the
-      slide's `panel_labels`.
+- [x] Fails if figure/table notes reference panel letters not present in either
+      the slide's native `panel_labels` or the image sidecar's embedded labels.
 - [x] Warns on literal `**` markup left in notes (the builder converts
       `**...**` to real bold, but stray markers usually signal a copy error).
 
@@ -57,6 +76,8 @@ invariant when modifying extraction, asset processing, deck building, or QA.
 - Run all checks using fully synthetic, specialty-neutral figures and data.
 - Verify both visual styles with complete 40–55-slide bilingual presentations.
 - Exercise image inversion, recursive source provenance, native panel labels,
-  figure uniqueness, table safety margins, split-table sizing, and vector tables.
+  preserved embedded labels, non-destructive crop integrity, bounded edge
+  cleanup, figure uniqueness, table safety margins, split-table sizing, and
+  vector tables.
 - Keep authorized papers, patient data, generated decks, intermediate artifacts,
   credentials, and personal filesystem paths outside public release archives.

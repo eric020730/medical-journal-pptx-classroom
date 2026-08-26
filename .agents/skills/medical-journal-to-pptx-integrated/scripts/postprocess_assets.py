@@ -249,6 +249,8 @@ def trim_image(
     remove_bottom_labels: bool,
     bg_aware: str = "auto",
     bg_tol: int = 26,
+    asset_type: str = "figure",
+    max_edge_px: int = 4,
 ) -> dict:
     im = Image.open(input_path).convert("RGB")
     box = expand_box(content_bbox(im, threshold), im.size, margin)
@@ -273,6 +275,16 @@ def trim_image(
             result, margin, bg_tol=bg_tol, force=(bg_aware == "on")
         )
 
+    # A single figure does not pass through the multipanel recomposer, so run
+    # the same bounded, color-safe seam check after background refinement.
+    # Tables, flowcharts, and deliberate padding must remain untouched.
+    if asset_type == "figure" and margin == 0:
+        from recompose_panels_banded import clean_panel_edges
+
+        result, edge_trim_px = clean_panel_edges(result, max_edge_px=max_edge_px)
+        refine_meta["edge_trim_px"] = edge_trim_px
+        refine_meta["max_edge_px"] = max_edge_px
+
     result.save(output_path, quality=95)
     return {"bg_aware": bg_aware, **refine_meta}
 
@@ -292,6 +304,7 @@ def labels_command(args: argparse.Namespace) -> None:
         True,
         bg_aware=bg_aware,
         bg_tol=bg_tol,
+        asset_type=asset_type,
     )
     extra = dict(
         labels=labels,
@@ -448,6 +461,7 @@ def trim_command(args: argparse.Namespace) -> None:
         False,
         bg_aware=bg_aware,
         bg_tol=bg_tol,
+        asset_type=asset_type,
     )
     extra = dict(
         margin=margin,

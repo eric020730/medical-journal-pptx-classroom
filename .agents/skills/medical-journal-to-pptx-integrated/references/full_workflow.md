@@ -108,9 +108,14 @@ python3 <skill-root>/scripts/postprocess_assets.py trim \
   <verified-table> <final-table> --asset-type table --margin 12
 ```
 
-A conservative two-pixel inward adjustment is acceptable for a non-flowchart
-raster panel only when visual review confirms no meaningful image content is
-lost. Never apply that adjustment to a table, flowchart, algorithm, or vector
+For single raster figures and raster panels on a dark slide, inspect each outer
+edge independently for a thin white, gray, or anti-aliased seam. The figure
+trimmer and banded recomposer remove only a verified achromatic seam and default
+to a hard four-pixel maximum per side;
+dark image background, colored perfusion scales, bright anatomy touching an
+edge, and light regions extending beyond the inspection budget are preserved.
+Never substitute a broad background-aware crop for this bounded panel cleanup.
+Do not apply panel rim cleanup to a table, flowchart, algorithm, or vector
 diagram. Record manually chosen crop boundaries in `crop_overrides.json`.
 
 For difficult layouts, read
@@ -125,7 +130,14 @@ slides.
 
 When a labeled raster figure contains multiple panels:
 
-1. Separate and trim each panel without losing its meaningful content.
+1. Separate each panel without overwriting or losing meaningful image content.
+   Treat grid-derived row boundaries as provisional: when neighboring panels
+   are verified crops from the same PDF-rendered source, detect a complete boxed
+   source label crossing a shared seam and shift that seam just beyond its
+   frame. Adjust each independent overlap group separately; a full-width lower
+   panel links all upper panels to one common seam. Never shift through a
+   colored scale or overlay, never fabricate replacement pixels, and retain
+   the original/effective crop boxes in the final image sidecar.
 2. Preserve provenance for every panel and intermediate transformation.
 3. Compare every reading-order-preserving row/column arrangement against the
    selected slide-box dimensions, each panel's aspect ratio, gutter width, and
@@ -133,10 +145,16 @@ When a labeled raster figure contains multiple panels:
    area of the smallest panel; use panel short-edge readability, total image
    area, empty cells, and fewer rows as tie-breakers. Align row heights and row
    widths, and fill controlled gutters with the selected slide background.
-4. Remove source-page panel letters where safe and provide complete panel
-   geometry through `panel_boxes`, `panel_label_x_fracs`, or a geometry file.
-5. Render every A/B/C/D label outside its corresponding panel and explain each
-   visible panel individually in the Traditional Chinese speaker notes.
+4. Inspect the actual location of each source A/B/C/D letter. If any letter is
+   embedded in image content, preserve the original letters for the entire
+   figure and do not draw a second set. Never cover a label with a black/white
+   rectangle, fill, content-aware inpainting, or fabricated image pixels.
+5. Remove source letters only when each is demonstrably confined to a separate,
+   uniform exterior margin. Record its placement and bounding box in the panel
+   sidecar; if the surrounding margin contains anatomy, color scales, or
+   annotations, preserve all source labels instead.
+6. Provide native-label geometry only for source-label-free panels, and explain
+   every visible A/B/C/D panel individually in Traditional Chinese notes.
 
 Prefer editable, native fixed-size PowerPoint panel labels when uniform size
 and precise row spacing matter:
@@ -145,12 +163,24 @@ and precise row spacing matter:
 python3 <skill-root>/scripts/recompose_panels_banded.py <final-figure> \
   --inputs <panel-a> <panel-b> <panel-c> <panel-d> \
   --labels A,B,C,D --geometry <panel-geometry.json> \
+  --source-label-policy auto --max-edge-px 4 --max-boundary-shift-px 24 \
   --gap-above-in 0.06 --gap-below-in 0.12 --label-pt 18 \
   --bg '#061428' --slide-box-w-in 12.10 --slide-box-h-in 4.85
 
 python3 <skill-root>/scripts/add_panel_labels.py <built.pptx> <labeled.pptx> \
   --spec <deck-spec.json> --geometry <panel-geometry.json> --label-pt 18
 ```
+
+Use `--source-label-policy preserve` when the source visibly contains embedded
+panel letters but an older extractor has no placement metadata. Modern panel
+sidecars can provide `source_label_placement: embedded` and `embedded_label`,
+or `source_panel_label: {placement: external-margin, box_px: [x0,y0,x1,y1]}`;
+`auto` preserves embedded labels and crops an exterior margin only after
+confirming that its pixels outside the label are uniformly blank. An unsafe
+margin falls back to preservation. Preserved figures receive no native-label
+band and no geometry entries, so their images can occupy more slide area.
+Do not add slide-spec `panel_labels` to preserved figures. Their sidecars keep
+`embedded_labels` for speaker-note validation instead.
 
 Omit `--cols` for automatic layout selection. Four portrait or approximately
 square panels frequently fit better in a single left-to-right 1 × 4 row than
@@ -162,8 +192,10 @@ measured on-screen panel sizes for reproducible review.
 
 The standard figure box is 12.10 × 4.85 inches; the nice figure box is
 12.13 × 4.95 inches. Pass the selected dimensions to the panel recomposer and
-use the same `--label-pt` value when stamping labels. Final QA checks that
-every expected label is visible in the finished presentation.
+use the same `--label-pt` value when stamping native labels. Final QA checks
+that every expected native label is visible, that preserved source labels are
+not duplicated, that source pixels were not overwritten, and that bounded edge
+cleanup remains within its declared limit.
 
 ## Preserve complete tables and vector assets
 

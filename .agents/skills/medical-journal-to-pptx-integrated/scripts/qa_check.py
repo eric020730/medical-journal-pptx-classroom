@@ -295,6 +295,54 @@ def validate_specification(
         if not isinstance(labels, list):
             failures.append(f"Figure slide {index} panel_labels must be a list.")
             labels = []
+        metadata = sidecar or {}
+        preserved = metadata.get("source_label_policy") == "preserve"
+        if preserved and (metadata.get("native_labels") or labels):
+            failures.append(
+                f"Figure slide {index} preserves embedded panel labels but also requests "
+                "native panel labels; this would duplicate the source letters."
+            )
+        cleanup_entries = metadata.get("panel_cleanup") or []
+        edge_limit = metadata.get("max_edge_px", 4)
+        boundary_limit = metadata.get("max_boundary_shift_px", 24)
+        for panel_number, cleanup in enumerate(cleanup_entries, start=1):
+            if not isinstance(cleanup, dict):
+                failures.append(f"Figure slide {index} panel {panel_number} cleanup metadata is invalid.")
+                continue
+            overwritten = cleanup.get("label_overwritten_pixels", 0)
+            if isinstance(overwritten, (int, float)) and overwritten > 0:
+                failures.append(
+                    f"Figure slide {index} panel {panel_number} overwrites {overwritten} "
+                    "source-image pixels while handling a panel label."
+                )
+            trims = cleanup.get("edge_trim_px") or {}
+            if any(
+                not isinstance(value, int) or value < 0
+                or not isinstance(edge_limit, int) or value > edge_limit
+                for value in trims.values()
+            ):
+                failures.append(
+                    f"Figure slide {index} panel {panel_number} exceeds its bounded "
+                    f"{edge_limit}px edge-cleanup limit."
+                )
+            for adjustment in cleanup.get("boundary_adjustments") or []:
+                if not isinstance(adjustment, dict):
+                    failures.append(
+                        f"Figure slide {index} panel {panel_number} boundary-adjustment metadata is invalid."
+                    )
+                    continue
+                shift = adjustment.get("shift_px")
+                if (
+                    not isinstance(shift, int)
+                    or shift <= 0
+                    or not isinstance(boundary_limit, int)
+                    or shift > boundary_limit
+                    or adjustment.get("reason") != "preserve-complete-embedded-label-frame"
+                ):
+                    failures.append(
+                        f"Figure slide {index} panel {panel_number} exceeds its bounded "
+                        f"{boundary_limit}px label-safe boundary adjustment."
+                    )
         if len(labels) > 1 and not slide.get("panel_geometry_exception"):
             fractions = slide.get("panel_label_x_fracs") or []
             boxes = slide.get("panel_boxes") or []
@@ -310,7 +358,8 @@ def validate_specification(
                 failures.append(
                     f"Figure slide {index} has {len(labels)} panel labels but no panel geometry."
                 )
-        label_set = {str(label).strip().upper() for label in labels}
+        semantic_labels = labels or metadata.get("embedded_labels") or metadata.get("labels") or []
+        label_set = {str(label).strip().upper() for label in semantic_labels}
         unknown = referenced_panel_letters(notes) - label_set if label_set else set()
         if unknown:
             failures.append(

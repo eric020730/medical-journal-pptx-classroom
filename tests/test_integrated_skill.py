@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from PIL import Image
+from PIL import Image, ImageDraw
 import pptx
 from pptx import Presentation
 from pptx.enum.dml import MSO_FILL
@@ -74,7 +74,7 @@ class IntegratedSkillStructureTests(unittest.TestCase):
         self.assertIn("--mode full", content)
         self.assertEqual(
             (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
-            "v4.0.0",
+            "v4.0.1",
         )
 
     def test_skill_preserves_all_image_building_and_quality_helpers(self) -> None:
@@ -91,7 +91,7 @@ class IntegratedSkillStructureTests(unittest.TestCase):
     def test_slide_aware_panel_layout_passes_synthetic_regressions(self) -> None:
         result = invoke(SKILL_ROOT / "scripts" / "test_panel_layout.py")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("Ran 4 tests", result.stderr)
+        self.assertRegex(result.stderr, r"Ran \d+ tests")
 
     def test_skill_is_independent_of_classroom_project_configuration(self) -> None:
         for path in (SKILL_ROOT / "scripts").glob("*.py"):
@@ -343,6 +343,109 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
     def test_nice_supports_fixed_size_native_a_b_panel_labels(self) -> None:
         self.check_native_panel_labels("nice")
 
+    def check_preserved_embedded_panel_labels(self, style: str) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, _, rendered = create_synthetic_inversion_fixture(root)
+            inputs = []
+            for label in ("A", "B"):
+                panel = write_asset(
+                    root,
+                    f"embedded-{label}.png",
+                    source=str(rendered),
+                    source_label_placement="embedded",
+                    embedded_label=label,
+                )
+                with Image.open(panel) as source:
+                    image = source.convert("RGB")
+                ImageDraw.Draw(image).text((8, image.height - 20), label, fill="white")
+                image.save(panel)
+                inputs.append(panel)
+
+            composite = root / "final_assets" / "Figure_01.png"
+            geometry = root / "panel_geometry.json"
+            recomposed = invoke(
+                SKILL_ROOT / "scripts" / "recompose_panels_banded.py",
+                composite,
+                "--inputs",
+                *inputs,
+                "--labels",
+                "A,B",
+                "--geometry",
+                geometry,
+            )
+            self.assertEqual(recomposed.returncode, 0, msg=recomposed.stderr)
+            metadata = json.loads(composite.with_suffix(".png.postprocess.json").read_text())
+            self.assertEqual(metadata["source_label_policy"], "preserve")
+            self.assertFalse(metadata["native_labels"])
+            self.assertEqual(metadata["embedded_labels"], ["A", "B"])
+            self.assertEqual(json.loads(geometry.read_text())[composite.stem], [])
+
+            spec = full_spec()
+            add_figure(
+                spec,
+                composite,
+                caption="Figure 1. Synthetic embedded source labels.",
+                notes="【圖片說明】🖼️【A 圖】與【B 圖】保留原始影像內標示。",
+            )
+            spec_path = write_spec(root, spec)
+            output = root / f"{style}-preserved-embedded-labels.pptx"
+            built = invoke(
+                SKILL_RUNNER,
+                "build",
+                spec_path,
+                "--out",
+                output,
+                "--mode",
+                "full",
+                "--style",
+                style,
+            )
+            self.assertEqual(built.returncode, 0, msg=built.stderr)
+            final = invoke(
+                SKILL_RUNNER,
+                "qa",
+                output,
+                "--spec",
+                spec_path,
+                "--mode",
+                "full",
+                "--style",
+                style,
+                "--json",
+            )
+            self.assertEqual(final.returncode, 0, msg=final.stderr or final.stdout)
+
+            geometry.write_text(json.dumps({composite.stem: [
+                {"label": "A", "fx_right": 0.5, "fy_center": 0.8},
+                {"label": "B", "fx_right": 1.0, "fy_center": 0.8},
+            ]}))
+            stamped = root / f"{style}-preserved-no-duplicate.pptx"
+            result = invoke(
+                SKILL_ROOT / "scripts" / "add_panel_labels.py",
+                output,
+                stamped,
+                "--spec",
+                spec_path,
+                "--geometry",
+                geometry,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn("added 0 native panel labels", result.stdout)
+            duplicates = [
+                shape.text_frame.text
+                for shape in Presentation(str(stamped)).slides[3].shapes
+                if getattr(shape, "has_text_frame", False)
+                and shape.text_frame.text in {"A", "B"}
+            ]
+            self.assertEqual(duplicates, [])
+
+    def test_standard_preserves_embedded_labels_without_duplicate_native_text(self) -> None:
+        self.check_preserved_embedded_panel_labels("standard")
+
+    def test_nice_preserves_embedded_labels_without_duplicate_native_text(self) -> None:
+        self.check_preserved_embedded_panel_labels("nice")
+
     def check_emf_vector_table(self, style: str) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -444,6 +547,130 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
 
 
 class IntegratedImageRegressionTests(unittest.TestCase):
+    def check_panel_cleanup_rejection(self, *, metadata: dict, notes: str | None = None,
+                                      slide: dict | None = None) -> dict:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, _, rendered = create_synthetic_inversion_fixture(root)
+            asset = write_asset(root, "Figure_01.png", source=str(rendered), **metadata)
+            spec = full_spec()
+            figure = add_figure(
+                spec,
+                asset,
+                caption="Figure 1. Synthetic panel-integrity regression.",
+                notes=notes or "【圖片說明】🖼️【A 圖】與【B 圖】為虛構影像。",
+            )
+            if slide:
+                figure.update(slide)
+            result = invoke(
+                SKILL_RUNNER,
+                "qa-spec",
+                write_spec(root, spec),
+                "--mode",
+                "full",
+                "--json",
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+            return json.loads(result.stdout)
+
+    def test_preserved_panel_notes_cannot_reference_nonexistent_embedded_label(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": False,
+                "embedded_labels": ["A", "B"],
+            },
+            notes="【圖片說明】🖼️【C 圖】並不存在。",
+        )
+        self.assertTrue(any("reference missing panel" in failure for failure in report["failures"]))
+
+    def test_preserved_source_labels_cannot_also_request_native_labels(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": True,
+                "embedded_labels": ["A", "B"],
+            }
+        )
+        self.assertTrue(any("duplicate" in failure for failure in report["failures"]))
+
+    def test_preserved_source_labels_cannot_also_use_slide_spec_labels(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": False,
+                "embedded_labels": ["A", "B"],
+            },
+            slide={"panel_labels": ["A", "B"], "panel_label_x_fracs": [0.4, 0.9]},
+        )
+        self.assertTrue(any("duplicate" in failure for failure in report["failures"]))
+
+    def test_panel_label_cleanup_cannot_overwrite_clinical_pixels(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": False,
+                "embedded_labels": ["A", "B"],
+                "max_edge_px": 4,
+                "panel_cleanup": [
+                    {"label_overwritten_pixels": 91, "edge_trim_px": {"left": 1}},
+                ],
+            }
+        )
+        self.assertTrue(any("overwrites 91" in failure for failure in report["failures"]))
+
+    def test_panel_edge_cleanup_cannot_exceed_its_declared_pixel_limit(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": False,
+                "embedded_labels": ["A", "B"],
+                "max_edge_px": 4,
+                "panel_cleanup": [
+                    {"label_overwritten_pixels": 0, "edge_trim_px": {"left": 5}},
+                ],
+            }
+        )
+        self.assertTrue(any("4px edge-cleanup limit" in failure for failure in report["failures"]))
+
+    def test_panel_boundary_adjustment_cannot_exceed_its_declared_pixel_limit(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": False,
+                "embedded_labels": ["A", "B"],
+                "max_boundary_shift_px": 12,
+                "panel_cleanup": [{
+                    "label_overwritten_pixels": 0,
+                    "edge_trim_px": {"left": 0},
+                    "boundary_adjustments": [{
+                        "shift_px": 13,
+                        "reason": "preserve-complete-embedded-label-frame",
+                    }],
+                }],
+            }
+        )
+        self.assertTrue(any("12px label-safe boundary" in failure for failure in report["failures"]))
+
+    def test_panel_boundary_adjustment_requires_a_verified_label_frame(self) -> None:
+        report = self.check_panel_cleanup_rejection(
+            metadata={
+                "source_label_policy": "preserve",
+                "native_labels": False,
+                "embedded_labels": ["A", "B"],
+                "max_boundary_shift_px": 12,
+                "panel_cleanup": [{
+                    "label_overwritten_pixels": 0,
+                    "edge_trim_px": {"left": 0},
+                    "boundary_adjustments": [{
+                        "shift_px": 4,
+                        "reason": "arbitrary-clinical-image-crop",
+                    }],
+                }],
+            }
+        )
+        self.assertTrue(any("label-safe boundary" in failure for failure in report["failures"]))
+
     def test_pdf_decode_array_is_detected_by_the_bundled_global_skill(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             manifest, raw, rendered = create_synthetic_inversion_fixture(Path(temporary))

@@ -42,7 +42,15 @@ duplicated paper Figure numbers, missing geometry, unsafe table margins,
 mismatched split-table widths, untranslated speaker notes, unrendered note bold
 markup, missing bundled logos, and expected native panel labels that are absent
 from the finished PowerPoint. Figures with native-label provenance must be
-stamped with `add_panel_labels.py` before final QA. EMF vector tables bypass
+stamped with `add_panel_labels.py` before final QA. Figures whose source labels
+overlap image content preserve the original letters and record
+`source_label_policy: preserve`, `native_labels: false`, and `embedded_labels`.
+The gate rejects duplicate native labels, overwritten clinical image pixels,
+panel-edge cleanup exceeding its recorded per-side limit, and source-row seam
+adjustments lacking a verified embedded-label frame or exceeding their declared
+pixel budget. Speaker notes
+must reference only labels present in either safe native or preserved source
+metadata. EMF vector tables bypass
 raster-sidecar requirements while retaining their aspect ratio and white
 presentation card.
 

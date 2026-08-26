@@ -168,11 +168,19 @@ minimal.
 ```
 
 `caption` is shown below the image in italic small text.
-`panel_labels` is optional for figures with no panel letters. For labeled
-multi-panel figures, it is required: remove the original A/B/C/D
-letters from the figure image crop, remove excess white margins, then use
-`panel_labels` so the builder places the labels centered under the image.
-Speaker notes must reference the same labels with `【A 圖】`, `【B 圖】`, etc.
+`panel_labels` is optional for figures with no panel letters. For source labels
+that are absent or safely removed from a separate, uniform exterior margin,
+provide `panel_labels` and valid geometry, or omit them from the spec and use
+the recomposer's native-label geometry plus `add_panel_labels.py`.
+
+When original A/B/C/D letters overlap anatomy, a color scale, annotations, or
+other image content, preserve those embedded letters; never erase, cover,
+inpaint, or crop clinical pixels to obtain editable labels. In that case omit
+`panel_labels` from the slide, and keep `source_label_policy: preserve`,
+`native_labels: false`, and `embedded_labels: ["A", "B", ...]` in the image
+sidecar. Never combine preserved embedded labels with a second native set.
+Speaker notes must reference the same visible labels with `【A 圖】`,
+`【B 圖】`, etc.; QA reads either native or embedded label metadata.
 
 ### `references`
 
@@ -213,8 +221,11 @@ Before running the builder, check:
 - [ ] At least one `part` slide.
 - [ ] Content, figure, and table slide titles follow the paper's heading and
       subheading map unless a deliberate exception is documented.
-- [ ] Labeled multi-panel figures use `panel_labels` rather than embedded
-      original A/B/C/D letters in the figure crop.
+- [ ] Labeled multi-panel figures use exactly one safe label system: editable
+      native letters after safe exterior-margin removal, or preserved embedded
+      source letters when removal would damage image content.
+- [ ] Embedded-label figures omit slide `panel_labels` and record their labels
+      in the image sidecar; no source image pixels are masked or inpainted.
 - [ ] Figure crops are tight to image content without excess white margins or
       loss of semantic content.
 - [ ] No paper Figure number appears on more than one `figure` slide, and no

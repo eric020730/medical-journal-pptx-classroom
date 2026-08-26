@@ -72,6 +72,16 @@ def main():
         name = Path(img).stem
         if name not in geom:
             continue
+        image_path = Path(img).expanduser()
+        if not image_path.is_absolute():
+            image_path = Path(a.spec).expanduser().resolve().parent / image_path
+        sidecar_path = Path(str(image_path) + ".postprocess.json")
+        if sidecar_path.is_file():
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            if sidecar.get("source_label_policy") == "preserve" or (
+                sidecar.get("embedded_labels") and not sidecar.get("native_labels")
+            ):
+                continue
         pic = biggest_picture(slide)
         if pic is None:
             continue
