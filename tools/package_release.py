@@ -263,7 +263,11 @@ def integrated_skill_files() -> list[tuple[Path, str]]:
 
 def create_skill_release(destination: Path | None = None) -> dict[str, Any]:
     """Build a deterministic skill-only ZIP without classroom PDFs or project data."""
-    version_match = re.search(r"v\d+\.\d+\.\d+", CONFIG["integrated_skill_version"])
+    skill_root = (
+        PROJECT_ROOT / ".agents" / "skills" / CONFIG["integrated_skill_name"]
+    )
+    skill_version = (skill_root / "VERSION").read_text(encoding="utf-8").strip()
+    version_match = re.search(r"v\d+\.\d+\.\d+", skill_version)
     if version_match is None:
         raise RuntimeError("Integrated skill version has no semantic component.")
     version = version_match.group(0)
@@ -291,7 +295,7 @@ def create_skill_release(destination: Path | None = None) -> dict[str, Any]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     manifest_lines = [
         "Medical Journal PPTX Integrated global skill release manifest",
-        f"Integrated skill version: {CONFIG['integrated_skill_version']}",
+        f"Integrated skill version: {skill_version}",
         "", "SHA256  PATH",
     ]
     with zipfile.ZipFile(destination, "w", allowZip64=True) as archive:
