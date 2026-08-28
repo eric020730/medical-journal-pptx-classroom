@@ -66,6 +66,8 @@ from PIL import Image, ImageColor
 
 
 EDGE_SIDES = ("top", "bottom", "left", "right")
+SOURCE_SEAM_TOPOLOGY_SCHEMA = "medical-journal-source-seam-topology/v1"
+MIN_SOURCE_SEAM_OVERLAP_PX = 8
 VERIFIED_EDGE_TRIM_MAX_PX = 12
 VERIFIED_EDGE_TRIM_REASONS = {
     "verified-pdf-exterior-band",
@@ -111,6 +113,160 @@ def normalized_box(value):
     except (TypeError, ValueError):
         return None
     return box if box[0] < box[2] and box[1] < box[3] else None
+
+
+def _panel_source_crop(metadata):
+    """Return an authenticated panel-crop source and integer box when declared."""
+    if metadata.get("command") != "panel-crop":
+        return None
+    source = resolved_source_path(metadata)
+    box = metadata.get("crop_box_px")
+    if (
+        source is None
+        or not isinstance(box, list)
+        or len(box) != 4
+        or not all(isinstance(value, int) and not isinstance(value, bool) for value in box)
+        or not (box[0] < box[2] and box[1] < box[3])
+    ):
+        return None
+    return source, tuple(box)
+
+
+def _orthogonal_overlap(first, second, axis):
+    if axis == "x":
+        start, end = max(first[1], second[1]), min(first[3], second[3])
+    else:
+        start, end = max(first[0], second[0]), min(first[2], second[2])
+    return start, end
+
+
+def infer_source_seam_topology(panel_metadata):
+    """Infer every internal edge between exact crops of the same source raster.
+
+    The inference uses source-space crop rectangles, not the requested display
+    grid. For each panel it selects the nearest overlapping neighbor to the
+    right and below. This preserves row-specific/column-specific seams, source
+    gutters, and spanning-panel topology without assuming equal cells.
+    """
+    grouped = {}
+    for panel_index, metadata in enumerate(panel_metadata):
+        record = _panel_source_crop(metadata)
+        if record is None:
+            continue
+        source, box = record
+        grouped.setdefault(str(source), []).append((panel_index, box))
+
+    requirements = {index: set() for index in range(len(panel_metadata))}
+    groups = []
+    for source_value, records in sorted(grouped.items()):
+        if len(records) < 2:
+            continue
+        adjacencies = []
+        for panel_index, box in records:
+            x0, y0, x1, y1 = box
+            right_candidates = []
+            lower_candidates = []
+            for neighbor_index, neighbor in records:
+                if neighbor_index == panel_index:
+                    continue
+                nx0, ny0, nx1, ny1 = neighbor
+                overlap_start, overlap_end = _orthogonal_overlap(box, neighbor, "x")
+                overlap = overlap_end - overlap_start
+                if nx0 >= x1 and overlap >= MIN_SOURCE_SEAM_OVERLAP_PX:
+                    right_candidates.append(
+                        (nx0 - x1, neighbor_index, neighbor, overlap_start, overlap_end)
+                    )
+                overlap_start, overlap_end = _orthogonal_overlap(box, neighbor, "y")
+                overlap = overlap_end - overlap_start
+                if ny0 >= y1 and overlap >= MIN_SOURCE_SEAM_OVERLAP_PX:
+                    lower_candidates.append(
+                        (ny0 - y1, neighbor_index, neighbor, overlap_start, overlap_end)
+                    )
+
+            for axis, candidates, first_edge, second_edge in (
+                ("x", right_candidates, "right", "left"),
+                ("y", lower_candidates, "bottom", "top"),
+            ):
+                if not candidates:
+                    continue
+                nearest_gap = min(candidate[0] for candidate in candidates)
+                for gap, neighbor_index, neighbor, overlap_start, overlap_end in candidates:
+                    if gap != nearest_gap:
+                        continue
+                    requirements[panel_index].add(first_edge)
+                    requirements[neighbor_index].add(second_edge)
+                    adjacencies.append({
+                        "axis": axis,
+                        "first_panel_index": panel_index,
+                        "first_edge": first_edge,
+                        "first_coordinate_px": x1 if axis == "x" else y1,
+                        "second_panel_index": neighbor_index,
+                        "second_edge": second_edge,
+                        "second_coordinate_px": neighbor[0] if axis == "x" else neighbor[1],
+                        "gap_px": gap,
+                        "orthogonal_overlap_px": [overlap_start, overlap_end],
+                    })
+
+        if not adjacencies:
+            raise ValueError(
+                "multiple panel-crops share one source but no source-space adjacency "
+                "could be inferred"
+            )
+        source_path = Path(source_value)
+        groups.append({
+            "source": source_value,
+            "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            "panel_indexes": sorted(index for index, _ in records),
+            "adjacencies": sorted(
+                adjacencies,
+                key=lambda entry: (
+                    entry["axis"], entry["first_panel_index"],
+                    entry["second_panel_index"], entry["gap_px"],
+                ),
+            ),
+        })
+
+    topology = {
+        "schema": SOURCE_SEAM_TOPOLOGY_SCHEMA,
+        "groups": groups,
+        "panel_required_edges": [
+            {"panel_index": index, "edges": sorted(edges)}
+            for index, edges in requirements.items() if edges
+        ],
+    }
+    return topology, requirements
+
+
+def require_inferred_source_seams(input_paths, panel_metadata):
+    """Fail closed when an inferred clinical interior edge lacks evidence."""
+    topology, requirements = infer_source_seam_topology(panel_metadata)
+    for panel_index, edges in requirements.items():
+        if not edges:
+            continue
+        metadata = panel_metadata[panel_index]
+        declared = metadata.get("required_seam_edges")
+        evidence = metadata.get("seam_reviews")
+        declared_set = set(declared) if isinstance(declared, list) else set()
+        evidence_set = set(evidence) if isinstance(evidence, dict) else set()
+        missing = sorted((edges - declared_set) | (edges - evidence_set))
+        mismatched = sorted(
+            edge for edge in edges
+            if edge in evidence_set and (
+                not isinstance(evidence.get(edge), dict)
+                or evidence[edge].get("edge") != edge
+            )
+        )
+        if missing or mismatched:
+            details = []
+            if missing:
+                details.append("missing " + ",".join(missing))
+            if mismatched:
+                details.append("mismatched " + ",".join(mismatched))
+            raise ValueError(
+                f"clinical panel {input_paths[panel_index]} lacks automatically required "
+                f"source-seam evidence ({'; '.join(details)})"
+            )
+    return topology
 
 
 def box_relationship(label_box, image_box):
@@ -1348,6 +1504,14 @@ def main():
     if labels and len(labels) != len(a.inputs):
         ap.error(f"label count ({len(labels)}) must equal panel count ({len(a.inputs)})")
     panel_metadata = [source_metadata(path) for path in a.inputs]
+    source_seam_topology = None
+    if a.asset_type == "clinical-image":
+        try:
+            source_seam_topology = require_inferred_source_seams(
+                a.inputs, panel_metadata
+            )
+        except (OSError, ValueError) as error:
+            ap.error(str(error))
     panels = [Image.open(p).convert("RGB") for p in a.inputs]
     for path, panel, metadata in zip(a.inputs, panels, panel_metadata):
         overwritten = overwritten_source_pixels(panel, metadata)
@@ -1525,6 +1689,7 @@ def main():
                    for index, path in enumerate(a.inputs)
                ],
                "source_inputs": [os.path.abspath(path) for path in a.inputs],
+               "source_seam_topology": source_seam_topology,
                "panel_boxes_px": rects,
                "layout_mode": ("template" if a.layout_template != "grid" else
                                "manual" if a.cols is not None else "auto"),

@@ -72,8 +72,11 @@ language rules, and final QA.
    independently with `seam-review` and its native-resolution overlay. Bind all
    constraining edges with repeatable paired `--seam-review`/`--seam-edge` and
    declare each required interior edge with `--require-seam-edge`; a panel may
-   carry several reports. Review both edges of a visible gutter separately and
-   reuse evidence only when its source band truly covers the attached edge. See
+   carry several reports. For clinical panels cropped from one source, the
+   banded recomposer independently infers all interior edges from source-space
+   topology and fails if any declaration or report is missing. Review both edges
+   of a visible gutter separately and reuse evidence only when its source band
+   truly covers the attached edge. See
    [crop design](references/article_level_crop_design.md) for the complete
    multi-seam evidence, replay, label, and bounded-cleanup contracts.
    Preserve verified source topology, relative scale, aspect ratios, gutters,

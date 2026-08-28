@@ -216,6 +216,11 @@ When a labeled raster figure contains multiple panels:
    left/right/top/bottom constraints on a panel and declare every expected
    interior edge with `--require-seam-edge`. If a source gutter creates two
    different boundaries, review the two panel edges separately.
+   For `clinical-image` composites, the banded recomposer also infers the
+   source-space adjacency graph from authenticated crop rectangles and rejects
+   any missing declaration or report; omitting all `--require-seam-edge`
+   arguments is not a compatibility path. Its sidecar records the inferred
+   graph for deterministic QA replay.
    Treat grid-derived row boundaries as provisional: when neighboring panels
    are verified crops from the same PDF-rendered source, detect a complete boxed
    source label crossing a shared seam and shift that seam just beyond its

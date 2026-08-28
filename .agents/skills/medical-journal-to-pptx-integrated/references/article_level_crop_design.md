@@ -55,6 +55,14 @@ different panel widths after journal layout, PDF placement, or rasterization.
    edge separately; do not force the crop rectangles to touch.
 6. Record the reviewed coordinates and report paths in `crop_overrides.json`.
    Keep the reports and overlays with the run QA evidence.
+7. For a `clinical-image` recomposition, the banded compositor groups exact
+   panel crops by authenticated source, infers the nearest overlapping neighbor
+   to the right and below, and derives both sides of every internal adjacency.
+   It refuses the composite when any inferred edge is absent from either
+   `required_seam_edges` or `seam_reviews`. The final sidecar records the
+   deterministic `medical-journal-source-seam-topology/v1` graph, and QA
+   regenerates and compares that graph. This closes the legacy path where a
+   caller omitted `--require-seam-edge` entirely.
 
 ## Caption Detection Heuristics
 

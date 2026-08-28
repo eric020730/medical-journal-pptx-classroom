@@ -109,6 +109,11 @@ left/right/top/bottom seam reviews; QA rejects missing required edges, duplicate
 edge bindings, changed reports/overlays, mismatched bands, or a crop coordinate
 that does not replay against any attached report. Distinct row/column bands and
 the two sides of a source gutter remain separate evidence. A replayable panel
+crop cannot bypass this check by omitting required edges: for clinical panels
+cropped from one authenticated raster, the banded compositor infers all nearest
+right/below source-space adjacencies, requires both sides of each adjacency,
+and records a deterministic source-seam topology graph. Final QA regenerates
+the graph and rejects a missing, changed, or stale topology record. A replayable panel
 crop may declare a separately verified 0–12 px
 edge trim with an allowed audit reason; final QA validates its per-side values,
 reason, and verified + heuristic = total arithmetic. A narrow full-edge bright

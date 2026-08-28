@@ -99,6 +99,13 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       interior left/right/top/bottom boundary. QA independently replays each
       report, native-resolution overlay hash, band, axis, and crop coordinate;
       duplicate, missing, cross-row, or cross-column evidence fails.
+- [x] Clinical banded recomposition groups exact panel crops by authenticated
+      source and infers nearest overlapping right/below adjacencies in source
+      coordinates. Both sides of every inferred adjacency must occur in
+      `required_seam_edges` and `seam_reviews`; legacy sidecars that omit the
+      declarations fail. The composite records a deterministic
+      `medical-journal-source-seam-topology/v1` graph, and final QA regenerates
+      and compares it so missing or stale topology metadata cannot pass.
 - [x] White, gray, and anti-aliased achromatic edge seams are trimmed by at most
       four pixels per side by default for both standalone raster figures and
       recomposed panels. A uniform dark clinical canvas stops the trim sequence,

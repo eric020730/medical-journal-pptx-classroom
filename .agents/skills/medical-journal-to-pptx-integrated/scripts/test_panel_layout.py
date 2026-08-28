@@ -138,6 +138,131 @@ class PanelLayoutTests(unittest.TestCase):
                 (6, 20, 40),
             )
 
+    def test_figure19_nonshared_horizontal_seams_are_automatically_required(self) -> None:
+        source = self.directory / "figure19-source.png"
+        image = Image.new("RGB", (300, 140), (10, 10, 10))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 99, 69), fill=(30, 45, 60))
+        draw.rectangle((100, 0, 199, 70), fill=(110, 25, 35))
+        draw.rectangle((200, 0, 299, 72), fill=(35, 75, 130))
+        draw.rectangle((0, 70, 99, 139), fill=(185, 190, 195))
+        draw.rectangle((100, 71, 199, 139), fill=(210, 105, 45))
+        draw.rectangle((200, 73, 299, 139), fill=(215, 205, 55))
+        image.save(source)
+
+        reviews = {}
+        review_specs = {
+            "top_ab": ("x", (0, 71), (95, 105), 100),
+            "top_bc": ("x", (0, 73), (195, 205), 200),
+            "bottom_de": ("x", (70, 140), (95, 105), 100),
+            "bottom_ef": ("x", (71, 140), (195, 205), 200),
+            "left_ad": ("y", (0, 100), (65, 76), 70),
+            "middle_be": ("y", (100, 200), (66, 77), 71),
+            "right_cf": ("y", (200, 300), (68, 79), 73),
+        }
+        for name, (axis, band, search, selected) in review_specs.items():
+            report = self.directory / f"{name}.json"
+            overlay = self.directory / f"{name}.png"
+            result = subprocess.run([
+                sys.executable, str(POSTPROCESS), "seam-review",
+                str(source), str(report), str(overlay),
+                "--axis", axis,
+                "--band", str(band[0]), str(band[1]),
+                "--search", str(search[0]), str(search[1]),
+                "--selected", str(selected),
+                "--tolerance", "0",
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            reviews[name] = report
+
+        boxes = [
+            (0, 0, 100, 70), (100, 0, 200, 71), (200, 0, 300, 73),
+            (0, 70, 100, 140), (100, 71, 200, 140), (200, 73, 300, 140),
+        ]
+        bindings = [
+            (("right", "top_ab"), ("bottom", "left_ad")),
+            (("left", "top_ab"), ("right", "top_bc"), ("bottom", "middle_be")),
+            (("left", "top_bc"), ("bottom", "right_cf")),
+            (("right", "bottom_de"), ("top", "left_ad")),
+            (("left", "bottom_de"), ("right", "bottom_ef"), ("top", "middle_be")),
+            (("left", "bottom_ef"), ("top", "right_cf")),
+        ]
+        panels = []
+        for index, (box, panel_bindings) in enumerate(zip(boxes, bindings)):
+            panel = self.directory / f"figure19-panel-{index}.png"
+            command = [
+                sys.executable, str(POSTPROCESS), "panel-crop",
+                str(source), str(panel),
+                "--box", *(str(value) for value in box),
+                "--label", chr(ord("A") + index),
+                "--label-placement", "absent",
+            ]
+            for edge, report_name in panel_bindings:
+                command.extend(("--seam-review", str(reviews[report_name]),
+                                "--seam-edge", edge,
+                                "--require-seam-edge", edge))
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            panels.append(panel)
+
+        output, sidecar, _ = self.compose_inputs(
+            panels, "--asset-type", "clinical-image", "--cols", "3", "--no-trim"
+        )
+
+        topology = sidecar["source_seam_topology"]
+        self.assertEqual(topology["schema"], "medical-journal-source-seam-topology/v1")
+        self.assertEqual(len(topology["groups"]), 1)
+        self.assertEqual(len(topology["groups"][0]["adjacencies"]), 7)
+        self.assertEqual(
+            topology["panel_required_edges"],
+            [
+                {"panel_index": 0, "edges": ["bottom", "right"]},
+                {"panel_index": 1, "edges": ["bottom", "left", "right"]},
+                {"panel_index": 2, "edges": ["bottom", "left"]},
+                {"panel_index": 3, "edges": ["right", "top"]},
+                {"panel_index": 4, "edges": ["left", "right", "top"]},
+                {"panel_index": 5, "edges": ["left", "top"]},
+            ],
+        )
+        handled, failures = image_polarity._deterministic_helper_evidence(output, sidecar)
+        self.assertTrue(handled)
+        self.assertFalse(failures)
+
+        tampered = dict(sidecar)
+        tampered.pop("source_seam_topology")
+        handled, failures = image_polarity._deterministic_helper_evidence(output, tampered)
+        self.assertTrue(handled)
+        self.assertTrue(any("source-seam topology" in failure for failure in failures))
+
+    def test_clinical_same_source_panel_crops_cannot_bypass_seam_evidence(self) -> None:
+        source = self.directory / "legacy-common-seam-source.png"
+        image = Image.new("RGB", (120, 80), (25, 50, 75))
+        ImageDraw.Draw(image).rectangle((0, 40, 119, 79), fill=(170, 185, 200))
+        image.save(source)
+        panels = []
+        for index, box in enumerate(((0, 0, 120, 40), (0, 40, 120, 80))):
+            panel = self.directory / f"legacy-common-seam-{index}.png"
+            result = subprocess.run([
+                sys.executable, str(POSTPROCESS), "panel-crop",
+                str(source), str(panel),
+                "--box", *(str(value) for value in box),
+                "--label", chr(ord("A") + index),
+                "--label-placement", "absent",
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            panels.append(panel)
+
+        result = subprocess.run([
+            sys.executable, str(SCRIPT), str(self.directory / "legacy-bypass.png"),
+            "--inputs", *(str(path) for path in panels),
+            "--labels", "A,B",
+            "--geometry", str(self.directory / "legacy-bypass-geometry.json"),
+            "--asset-type", "clinical-image", "--cols", "1", "--no-trim",
+        ], capture_output=True, text=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("automatically required source-seam evidence", result.stderr)
+
     def test_explicit_columns_remain_manual_override(self) -> None:
         result = self.compose(600, 800, "--cols", "2")
 

@@ -1400,6 +1400,22 @@ def _deterministic_helper_evidence(asset: Path, sidecar: dict[str, Any]) -> tupl
                     if sidecar["no_trim"]:
                         invocation.append("--no-trim")
                 subprocess.run(invocation, check=True, capture_output=True, text=True)
+                if command == "recompose-panels-banded":
+                    replay_sidecar_path = Path(str(regenerated) + ".postprocess.json")
+                    try:
+                        replay_sidecar = json.loads(
+                            replay_sidecar_path.read_text(encoding="utf-8")
+                        )
+                    except (OSError, json.JSONDecodeError):
+                        return True, [
+                            f"Asset {asset.name} compositor replay did not produce a readable sidecar."
+                        ]
+                    recorded_topology = sidecar.get("source_seam_topology")
+                    replayed_topology = replay_sidecar.get("source_seam_topology")
+                    if recorded_topology != replayed_topology:
+                        return True, [
+                            f"Asset {asset.name} source-seam topology is missing, changed, or stale."
+                        ]
             else:
                 import postprocess_assets
 
