@@ -125,6 +125,9 @@ invariant when modifying extraction, asset processing, deck building, or QA.
 - [x] Banded composites report a QA warning when a 5–12 px full-edge near-white
       band survives the heuristic cap and terminates in distinctly darker
       content. Broad white-background panels do not trigger this warning.
+- [x] When `--no-trim` disables bounded cleanup, the same review includes
+      1–4 px full-edge near-white bands and QA blocks the asset until its crop
+      box or audited trim removes the residual PDF frame.
 - [x] A verified image-content box is applied before heuristic rim cleanup, so
       a PDF crop frame does not combine with the raster's own antialiased edge
       and exceed the four-pixel safety budget.

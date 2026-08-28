@@ -122,7 +122,9 @@ edge trim with an allowed audit reason; final QA validates its per-side values,
 reason, and verified + heuristic = total arithmetic. A narrow full-edge bright
 band that exceeds the default heuristic cap and terminates in darker content
 within the review budget is reported as a non-blocking warning instead of
-passing silently. Broad white-background panels are not treated as narrow
+passing silently. When bounded cleanup is disabled with `--no-trim`, the same
+review covers 1–12 px and becomes blocking so a thin PDF frame cannot pass as a
+clinical-image edge. Broad white-background panels are not treated as narrow
 edge-band candidates. Speaker notes
 must reference only labels present in either safe native or preserved source
 metadata. Simplified-only forms, repeated glyph/short-phrase padding,

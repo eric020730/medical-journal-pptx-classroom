@@ -335,6 +335,23 @@ class PanelLayoutTests(unittest.TestCase):
         self.assertEqual(review["status"], "needs-review")
         self.assertEqual(review["candidates"]["bottom"]["depth_px"], 5)
 
+    def test_disabled_cleanup_reports_two_pixel_white_edge_for_review(self) -> None:
+        image = Image.new("RGB", (120, 100), (7, 7, 7))
+        ImageDraw.Draw(image).rectangle((0, 0, 1, 99), fill=(252, 252, 252))
+
+        review = residual_edge_review(
+            image,
+            max_edge_px=4,
+            include_bounded=True,
+        )
+
+        self.assertEqual(review["status"], "needs-review")
+        self.assertEqual(review["candidates"]["left"]["depth_px"], 2)
+        self.assertEqual(
+            review["candidates"]["left"]["reason"],
+            "full-edge-near-white-band-survives-disabled-cleanup",
+        )
+
     def test_broad_white_background_is_not_misreported_as_a_narrow_edge(self) -> None:
         image = Image.new("RGB", (120, 100), (252, 252, 252))
 

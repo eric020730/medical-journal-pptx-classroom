@@ -576,12 +576,21 @@ def apply_verified_edge_trim(image, metadata, label_mode):
     )), trim_px, reason
 
 
-def residual_edge_review(image, max_edge_px=4, review_max_px=VERIFIED_EDGE_TRIM_MAX_PX):
-    """Report a narrow full-edge white band that the hard cap preserved.
+def residual_edge_review(
+    image,
+    max_edge_px=4,
+    review_max_px=VERIFIED_EDGE_TRIM_MAX_PX,
+    *,
+    include_bounded=False,
+):
+    """Report a narrow full-edge white band that cleanup preserved or skipped.
 
     Broad white-background panels remain unflagged: a candidate must terminate
     in a distinctly darker inward line within the independent review budget.
-    The result is metadata for QA review, not permission to crop pixels.
+    Normally only bands beyond the automatic cleanup limit are reported.  When
+    cleanup is disabled, ``include_bounded`` also reports 1–``max_edge_px``
+    bands so ``--no-trim`` cannot silently preserve a thin PDF frame.  The
+    result is metadata for QA review, not permission to crop pixels.
     """
     pixels = np.asarray(image.convert("RGB"))
     height, width = pixels.shape[:2]
@@ -600,7 +609,8 @@ def residual_edge_review(image, max_edge_px=4, review_max_px=VERIFIED_EDGE_TRIM_
                 break
             band_luminance.append(float(line.mean()))
             depth += 1
-        if not max_edge_px < depth <= limit:
+        minimum_depth = 1 if include_bounded else max_edge_px + 1
+        if not minimum_depth <= depth <= limit:
             continue
         inner = edge_line(pixels, side, depth).astype(np.int16)
         inner_near_white = float(np.mean(inner.min(axis=1) >= 210))
@@ -615,7 +625,11 @@ def residual_edge_review(image, max_edge_px=4, review_max_px=VERIFIED_EDGE_TRIM_
             "band_luminance": round(float(np.mean(band_luminance)), 3),
             "inner_luminance": round(inner_luminance, 3),
             "contrast": round(contrast, 3),
-            "reason": "full-edge-near-white-band-exceeds-default-limit",
+            "reason": (
+                "full-edge-near-white-band-survives-disabled-cleanup"
+                if include_bounded and depth <= max_edge_px
+                else "full-edge-near-white-band-exceeds-default-limit"
+            ),
         }
     return {
         "status": "needs-review" if candidates else "clear",
@@ -1583,7 +1597,11 @@ def main():
                     side: verified_edges[side] + heuristic_edges[side]
                     for side in EDGE_SIDES
                 },
-                "residual_edge_review": residual_edge_review(cleaned, a.max_edge_px),
+                "residual_edge_review": residual_edge_review(
+                    cleaned,
+                    a.max_edge_px,
+                    include_bounded=a.no_trim,
+                ),
             })
     except ValueError as error:
         ap.error(str(error))

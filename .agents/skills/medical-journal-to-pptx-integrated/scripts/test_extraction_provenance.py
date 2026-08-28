@@ -66,9 +66,9 @@ class ProvenanceTests(unittest.TestCase):
         document = pymupdf.open()
         page = document.new_page(width=450, height=650)
         page.insert_image(pymupdf.Rect(50, 50, 350, 200), filename=str(upper))
-        # AJR and other journals commonly abbreviate the caption label as
-        # "Fig."; the authenticated caption validator must accept both forms.
-        page.insert_text((50, 220), "Fig. 4. Upper clinical image.", fontsize=10)
+        # AJNR and other journals may abbreviate the caption label as "FIG"
+        # without a period; the authenticated validator must accept that form.
+        page.insert_text((50, 220), "FIG 4. Upper clinical image.", fontsize=10)
         page.insert_image(pymupdf.Rect(50, 280, 350, 440), filename=str(lower))
         page.insert_text((50, 460), "Figure 5. Lower clinical image.", fontsize=10)
         document.save(pdf)

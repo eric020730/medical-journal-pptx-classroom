@@ -619,10 +619,17 @@ def validate_specification(
             review = cleanup.get("residual_edge_review")
             if isinstance(review, dict) and review.get("status") == "needs-review":
                 candidates = review.get("candidates") or {}
-                warnings.append(
+                message = (
                     f"Figure slide {index} panel {panel_number} retains a narrow full-edge "
                     f"bright band requiring image-box or verified-trim review: {candidates}."
                 )
+                if metadata.get("no_trim") is True:
+                    failures.append(
+                        message
+                        + " Bounded cleanup was disabled, so this residual frame is blocking."
+                    )
+                else:
+                    warnings.append(message)
             for adjustment in cleanup.get("boundary_adjustments") or []:
                 if not isinstance(adjustment, dict):
                     failures.append(

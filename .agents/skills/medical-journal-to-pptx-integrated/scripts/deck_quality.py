@@ -324,11 +324,19 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard", strict=
             review = cleanup.get("residual_edge_review")
             if isinstance(review, dict) and review.get("status") == "needs-review":
                 candidates = review.get("candidates") or {}
-                rep.warn(
-                    "panel_residual_edge_review",
-                    f"slide {idx} panel {panel_number} retains a narrow full-edge bright band: {candidates}",
-                    "Verify the image box or declare a reviewed per-edge trim with panel-crop.",
-                )
+                if sidecar.get("no_trim") is True:
+                    rep.fail(
+                        "panel_residual_edge_review",
+                        f"slide {idx} panel {panel_number} disables cleanup but retains "
+                        f"a narrow full-edge bright band: {candidates}",
+                        "Correct the crop box or allow bounded edge cleanup before building.",
+                    )
+                else:
+                    rep.warn(
+                        "panel_residual_edge_review",
+                        f"slide {idx} panel {panel_number} retains a narrow full-edge bright band: {candidates}",
+                        "Verify the image box or declare a reviewed per-edge trim with panel-crop.",
+                    )
             boundary_limit = sidecar.get("max_boundary_shift_px", 24)
             for adjustment in cleanup.get("boundary_adjustments") or []:
                 if (not isinstance(adjustment, dict)

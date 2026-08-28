@@ -701,6 +701,38 @@ class BuildBindingTests(unittest.TestCase):
             report["warnings"],
         )
 
+    def test_qa_rejects_bounded_bright_frame_when_cleanup_is_disabled(self) -> None:
+        panel = self.root / "disabled-cleanup-panel.png"
+        image = Image.new("RGB", (160, 120), (10, 10, 10))
+        ImageDraw.Draw(image).rectangle((0, 0, 1, 119), fill=(252, 252, 252))
+        image.save(panel)
+        final = self.root / "disabled-cleanup-composite.png"
+        subprocess.run([
+            sys.executable,
+            str(Path(__file__).with_name("recompose_panels_banded.py")),
+            str(final),
+            "--inputs", str(panel),
+            "--geometry", str(self.root / "disabled-cleanup-geometry.json"),
+            "--no-trim",
+        ], check=True, capture_output=True, text=True)
+        value = valid_spec()
+        value["slides"][3] = {
+            "type": "figure",
+            "title": "Figure 1. Synthetic disabled cleanup",
+            "image": final.name,
+            "caption": "Figure 1. Synthetic disabled-cleanup example.",
+            "notes": "🖼️ 本頁驗證停用自動修邊時，薄白框必須被品質檢查攔截，避免殘留於輸出的臨床影像。",
+        }
+        spec_path = self.write_spec(value)
+
+        report = qa_check.validate_specification(spec_path, audit_images=False)
+
+        self.assertFalse(report["ok"])
+        self.assertTrue(
+            any("Bounded cleanup was disabled" in failure for failure in report["failures"]),
+            report["failures"],
+        )
+
     def test_vector_only_slide_requires_extraction_manifest_before_qa_or_build(self) -> None:
         vector = self.root / "table.emf"
         vector.write_bytes(b"synthetic-emf")

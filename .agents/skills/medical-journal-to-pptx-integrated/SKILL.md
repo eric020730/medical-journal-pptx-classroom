@@ -87,7 +87,10 @@ language rules, and final QA.
    matching reviewed topology; spanning templates require embedded labels.
    Protect anatomy, colored scales, annotations, flowcharts, table headers, and
    footnotes. Remove only confirmed PDF frames and bounded thin raster rims;
-   never peel broad acquisition canvas or trim through a preserved label.
+   never peel broad acquisition canvas or trim through a preserved label. Do not use
+   `--no-trim` as a blanket shortcut: with cleanup disabled, any 1–12 px full-edge
+   near-white band ending in darker content blocks QA. Resolve it through the crop
+   box or a safe audited trim before building.
    Classify by content: clinical images use a 0 px outer canvas; figures and
    flowcharts use exactly 16 px; raster tables use 8–24 px (default 16).
    Intermediate crops default to 0 px. Preserve split-table widths and optional
