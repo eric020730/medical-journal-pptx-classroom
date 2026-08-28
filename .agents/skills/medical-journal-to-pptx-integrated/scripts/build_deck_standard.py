@@ -26,6 +26,8 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from PIL import Image
 
 import vector_table
+import article_asset_map
+import postprocess_assets
 
 # ---------- Style constants (match references/visual_style.md) ----------
 
@@ -95,19 +97,31 @@ def require_postprocessed_figure_assets(spec: dict, spec_dir: Path) -> None:
         if not sidecar.exists():
             missing.append(f"slide {idx}: {image_path}")
             continue
+        try:
+            metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            invalid.append(f"slide {idx}: unreadable sidecar ({error})")
+            continue
+        if not isinstance(metadata, dict):
+            invalid.append(f"slide {idx}: sidecar must be a JSON object")
+            continue
         if suffix in vector_table.VECTOR_SUFFIXES:
-            try:
-                metadata = json.loads(sidecar.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as error:
-                invalid.append(f"slide {idx}: unreadable vector sidecar ({error})")
-                continue
-            if not isinstance(metadata, dict):
-                invalid.append(f"slide {idx}: vector sidecar must be a JSON object")
-                continue
             invalid.extend(
                 f"slide {idx}: {failure}"
                 for failure in vector_table.sidecar_structure_failures(metadata)
             )
+        else:
+            invalid.extend(
+                f"slide {idx}: {failure}"
+                for failure in postprocess_assets.validate_final_sidecar(
+                    image_path, metadata
+                )
+            )
+
+    map_path = article_asset_map.map_path_from_spec(spec_dir / "deck-spec.json", spec)
+    if map_path is not None:
+        map_result = article_asset_map.validate_map(map_path)
+        invalid.extend(map_result.get("failures", []))
 
     manifest: Path | None = None
     meta = spec.get("meta")

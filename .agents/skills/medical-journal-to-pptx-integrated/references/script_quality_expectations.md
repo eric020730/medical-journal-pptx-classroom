@@ -32,10 +32,11 @@ invariant when modifying extraction, asset processing, deck building, or QA.
 
 ## Asset processing
 
-- [x] `trim` and `labels` accept `--asset-type {figure,table,flowchart,unknown}`
+- [x] `trim` and `labels` accept `--asset-type {clinical-image,figure,table,flowchart,unknown}`
       and `--intermediate`.
-- [x] Final `figure`, `flowchart`, and `table` assets default to an exact 16 px safety canvas
-      added after the unpadded core is trimmed; `--intermediate` defaults to 0.
+- [x] Final `clinical-image` assets require a 0 px outer raster canvas. Final
+      nonclinical `figure` and `flowchart` assets require exactly 16 px;
+      `--intermediate` defaults to 0.
 - [x] `--asset-type table` defaults to `--margin 16` and rejects a final table
       output outside 8–24 px unless `--intermediate` is supplied (signalling
       a later padding/white-canvas step will restore the safety margin).
@@ -60,10 +61,17 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       count against the actual slide box, panel proportions, gutters, and
       native-label bands. It maximizes the smallest displayed panel and keeps
       source reading order; explicit `--cols` remains a manual override.
-- [x] Banded composites default to an exact 16 px outer safety canvas. Candidate
-      fit, fixed-size label bands, and native-label anchors all use the padded
-      dimensions; `--safety-margin-px 0` remains an explicit compatibility
-      override for intermediates but cannot pass final-asset QA.
+- [x] Banded composites default by asset type: `clinical-image` requires 0 px
+      and `figure` requires 16 px. Candidate fit, fixed-size label bands, and
+      native-label anchors use those exact final dimensions; mismatched explicit
+      margins fail. Every regular grid row absorbs integer resize rounding in
+      its final panel so a 0 px clinical canvas exposes no right-edge background strip.
+- [x] A reviewed `left-span-2x2` template arranges exactly five preserved-label
+      panels with panel 1 spanning both rows and panels 2–5 in a 2×2 block.
+      Native label bands and `--cols` are rejected for this irregular template.
+- [x] A reviewed `right-span-2x2` template preserves semantic A/B/C/D/E order,
+      keeps panel 3 as the full-height right span, and leaves panels 1–2/4–5 in
+      their upper/lower 2×2 source topology. Every resize preserves aspect ratio.
 - [x] Embedded source labels remain untouched and suppress both native-label
       geometry and label bands. Exterior labels are cropped only after their
       surrounding margin is proven uniform; unsafe margins preserve the source.
@@ -71,11 +79,26 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       count must equal panel count; a run without replacement labels never crops
       a source label. Native label geometry must be finite and in `[0,1]`, and
       repeat stamping is idempotent.
+- [x] `panel-crop --label-placement absent` is the only supported way to claim
+      a reviewed missing source label. It forbids label/image boxes and records
+      the full decoded panel bbox plus RGB SHA-256; recomposition rejects stale
+      or tampered evidence. Final sidecars keep disjoint embedded,
+      cropped-exterior, and verified-absent label groups, with native labels
+      equal to the latter two groups.
 - [x] Raster helpers reject input/output path identity. The legacy `labels`
       command requires a positive, visually verified `--cut-bottom-px` and never
       guesses the label boundary.
 - [x] Exact-source panel crops containing a solid corner overwrite are rejected
       instead of silently covering anatomy, annotations, or clinical overlays.
+- [x] `panel-crop` creates only exact, unpadded intermediate rectangles from an
+      authenticated raster, records typed source/output sizes and label/image
+      geometry, and is replayed pixel-for-pixel by final QA. Hand-authored or
+      unknown panel-crop commands remain fail-closed.
+- [x] `panel-crop` accepts repeatable paired seam reports and edges, stores an
+      edge-keyed multi-seam evidence map, and can require every declared
+      interior left/right/top/bottom boundary. QA independently replays each
+      report, native-resolution overlay hash, band, axis, and crop coordinate;
+      duplicate, missing, cross-row, or cross-column evidence fails.
 - [x] White, gray, and anti-aliased achromatic edge seams are trimmed by at most
       four pixels per side by default for both standalone raster figures and
       recomposed panels. A uniform dark clinical canvas stops the trim sequence,
@@ -83,6 +106,15 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       of being retained by the safety cap; dark borders facing brighter content,
       colored scales, bright edge-touching content, tables, flowcharts, and
       thicker ambiguous light regions are preserved.
+- [x] `panel-crop` can record a reviewed 0–12 px `TOP BOTTOM LEFT RIGHT`
+      edge-trim declaration plus a typed audit reason without changing the
+      exact intermediate crop. The banded recomposer applies it only after
+      verified image-box/exterior-label removal, rejects it for preserved
+      embedded labels, and records verified, heuristic, and total depths
+      separately. The four-pixel automatic default is unchanged.
+- [x] Banded composites report a QA warning when a 5–12 px full-edge near-white
+      band survives the heuristic cap and terminates in distinctly darker
+      content. Broad white-background panels do not trigger this warning.
 - [x] A verified image-content box is applied before heuristic rim cleanup, so
       a PDF crop frame does not combine with the raster's own antialiased edge
       and exceed the four-pixel safety budget.
@@ -102,7 +134,7 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       label policy, overwritten-pixel count, bounded row-seam adjustments,
       per-side edge-trim depths, safety margin, background, and padded/unpadded
       dimensions.
-- [x] `trim`, `labels`, `same-width`, `split-table`, `crop-vector-figure`,
+- [x] `trim`, `labels`, `panel-crop`, `same-width`, `split-table`, `crop-vector-figure`,
       auto-split composites, aligned composites, and banded composites record complete replay
       parameters. Final QA regenerates their output and requires exact decoded
       pixels; unknown or non-replayable final commands fail closed.
@@ -133,6 +165,11 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       raster by SHA-256. QA validates strict field types, extraction-root paths,
       complete page numbering, fresh PDF page renders, in-page crop geometry,
       and byte-identical unique aliases before creating a trusted-terminal set.
+- [x] `article_asset_map.py` binds semantic `figure:N`/`table:N` identifiers to
+      authenticated manifest files using PDF/manifest hashes, replayed caption
+      bbox/text hashes, and deterministic caption-neighbor geometry. Deck slides
+      carry `source_asset_id`; QA requires recursive final provenance to end at
+      the mapped raster, and the build manifest fingerprints the map file.
 - [x] Extraction writes only to a new or empty directory and never deletes or
       overwrites files claimed by mutable prior manifests.
 - [x] Malformed manifests return structured failures. Direct-PDF flowcharts
@@ -151,8 +188,10 @@ invariant when modifying extraction, asset processing, deck building, or QA.
 - Run all checks using fully synthetic, specialty-neutral figures and data.
 - Verify both visual styles with complete 40–55-slide bilingual presentations.
 - Exercise image inversion, recursive source provenance, native panel labels,
-  preserved embedded labels, non-destructive crop integrity, bounded edge
-  cleanup, figure uniqueness, table safety margins, split-table sizing, and
-  vector tables.
+  preserved embedded labels, verified-absent evidence, non-destructive crop
+  integrity, multi-edge/non-shared seam evidence, source gutters, row-specific
+  boundaries, spanning source topology, bounded edge cleanup, clinical 0 px/nonclinical 16 px canvases,
+  caption-to-source mapping, figure uniqueness, table safety margins,
+  split-table sizing, and vector tables.
 - Keep authorized papers, patient data, generated decks, intermediate artifacts,
   credentials, and personal filesystem paths outside public release archives.

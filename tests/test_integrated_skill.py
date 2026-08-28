@@ -72,7 +72,7 @@ class IntegratedSkillStructureTests(unittest.TestCase):
         self.assertIn("`full` is the only supported content mode", content)
         self.assertIn("--mode full", content)
         version = (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
-        self.assertEqual(version, "v4.1.0")
+        self.assertEqual(version, "v4.3.0")
         project = json.loads(
             (PROJECT_ROOT / ".classroom-project.json").read_text(encoding="utf-8")
         )

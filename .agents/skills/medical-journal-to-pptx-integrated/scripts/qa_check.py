@@ -576,6 +576,53 @@ def validate_specification(
                     f"Figure slide {index} panel {panel_number} exceeds its bounded "
                     f"{edge_limit}px edge-cleanup limit."
                 )
+            verified_limit = metadata.get("verified_edge_trim_max_px", 12)
+            verified = cleanup.get("verified_edge_trim_px")
+            verified_reason = cleanup.get("verified_edge_trim_reason", "")
+            if verified is not None:
+                valid_verified = (
+                    isinstance(verified, dict)
+                    and set(verified) == {"top", "bottom", "left", "right"}
+                    and isinstance(verified_limit, int)
+                    and not isinstance(verified_limit, bool)
+                    and 0 <= verified_limit <= 12
+                    and all(
+                        isinstance(value, int)
+                        and not isinstance(value, bool)
+                        and 0 <= value <= verified_limit
+                        for value in verified.values()
+                    )
+                )
+                reason_allowed = verified_reason in {
+                    "verified-pdf-exterior-band",
+                    "verified-image-box-correction",
+                    "manual-visual-review",
+                }
+                if not valid_verified or (any(verified.values()) and not reason_allowed):
+                    failures.append(
+                        f"Figure slide {index} panel {panel_number} has invalid verified "
+                        "edge-trim evidence."
+                    )
+                total = cleanup.get("total_edge_trim_px")
+                if valid_verified and total is not None and (
+                    not isinstance(total, dict)
+                    or set(total) != {"top", "bottom", "left", "right"}
+                    or any(
+                        total.get(side) != verified[side] + trims.get(side, 0)
+                        for side in verified
+                    )
+                ):
+                    failures.append(
+                        f"Figure slide {index} panel {panel_number} has inconsistent "
+                        "total edge-trim metadata."
+                    )
+            review = cleanup.get("residual_edge_review")
+            if isinstance(review, dict) and review.get("status") == "needs-review":
+                candidates = review.get("candidates") or {}
+                warnings.append(
+                    f"Figure slide {index} panel {panel_number} retains a narrow full-edge "
+                    f"bright band requiring image-box or verified-trim review: {candidates}."
+                )
             for adjustment in cleanup.get("boundary_adjustments") or []:
                 if not isinstance(adjustment, dict):
                     failures.append(
@@ -850,6 +897,10 @@ def _check_build_manifest(
             if manifest.get("slides") != binding["slides"]:
                 failures.append(
                     "PowerPoint source binding does not match the current per-slide content/image SHA-256 inventory."
+                )
+            if manifest.get("external_bindings") != binding.get("external_bindings"):
+                failures.append(
+                    "PowerPoint article asset-map binding does not match the current caption/source map."
                 )
             if style is not None:
                 try:

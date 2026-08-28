@@ -21,6 +21,7 @@ from pptx import Presentation
 
 import build_deck_nice
 import build_deck_standard
+import article_asset_map
 
 
 STYLE_IMAGE_BOXES = {
@@ -435,13 +436,22 @@ def make_serialized_rendered_binding(
 
 def make_spec_binding(specification: dict[str, Any], spec_path: Path) -> dict[str, Any]:
     """Return the canonical source-spec and per-slide asset SHA-256 inventory."""
-    return {
+    binding = {
         "spec_sha256": _sha256_bytes(_canonical_bytes(specification)),
         "slides": [
             _slide_spec_manifest(slide, index, spec_path.parent)
             for index, slide in enumerate(specification.get("slides", []), start=1)
         ],
     }
+    map_path = article_asset_map.map_path_from_spec(spec_path, specification)
+    if map_path is not None:
+        binding["external_bindings"] = {
+            "article_asset_map": {
+                "path": str(map_path),
+                "sha256": _sha256_file(map_path),
+            }
+        }
+    return binding
 
 
 def make_build_manifest(

@@ -1,6 +1,6 @@
 # 全域整合版 Skill：安裝、升級與解除安裝
 
-`medical-journal-to-pptx-integrated v4.1.0` 是真正獨立的全域 Codex
+`medical-journal-to-pptx-integrated v4.3.0` 是真正獨立的全域 Codex
 skill。安裝後不必打開 classroom repository；在任何專案或工作資料夾都可以
 使用 `$medical-journal-to-pptx-integrated`。
 
@@ -26,28 +26,28 @@ repository 內的 `$medical-journal-to-pptx-classroom` 也只接受 `full`，
 ## 從 GitHub release 下載
 
 1. 開啟 [GitHub Releases](https://github.com/eric020730/medical-journal-pptx-classroom/releases/latest)。
-2. 下載 `medical-journal-to-pptx-integrated-v4.1.0.zip` 及同名 `.sha256`。
+2. 下載 `medical-journal-to-pptx-integrated-v4.3.0.zip` 及同名 `.sha256`。
 3. 驗證 SHA-256，然後完整解壓縮。不要只複製單一 `SKILL.md`；scripts、
    references、logo 與 requirements 都是 skill 必要部分。
 
 macOS / Linux：
 
 ```bash
-shasum -a 256 -c medical-journal-to-pptx-integrated-v4.1.0.zip.sha256
-unzip medical-journal-to-pptx-integrated-v4.1.0.zip
-cd medical-journal-to-pptx-integrated-v4.1.0
+shasum -a 256 -c medical-journal-to-pptx-integrated-v4.3.0.zip.sha256
+unzip medical-journal-to-pptx-integrated-v4.3.0.zip
+cd medical-journal-to-pptx-integrated-v4.3.0
 bash install-global.sh install
 ```
 
 Windows PowerShell：
 
 ```powershell
-$archive = "medical-journal-to-pptx-integrated-v4.1.0.zip"
+$archive = "medical-journal-to-pptx-integrated-v4.3.0.zip"
 $expected = ((Get-Content "$archive.sha256") -split "\s+")[0]
 $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "SHA-256 mismatch" }
 Expand-Archive $archive -DestinationPath .
-Set-Location .\medical-journal-to-pptx-integrated-v4.1.0
+Set-Location .\medical-journal-to-pptx-integrated-v4.3.0
 .\install-global.ps1 install
 ```
 

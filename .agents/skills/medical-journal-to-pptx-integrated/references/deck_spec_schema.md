@@ -18,6 +18,8 @@ that describes the whole deck. This document is the reference for its shape.
 |-------|------|----------|-------|
 | `footer_label` | string | yes | Running footer text on content/figure slides. Format: `"<first author> et al — <journal> <year>  |  <short English topic>"` — English only. |
 | `logo_path` | string | no | Absolute or relative path to a logo image. If omitted, the skill uses `assets/dr_leether_logo.png` by default. Shown at the upper-right on non-title/non-closing slides only. |
+| `extraction_manifest` | string | yes when slides use source images | Path to the fresh machine-owned extraction manifest authenticated against the source PDF. |
+| `article_asset_map` | string | yes when the paper has Figure/Table slides | Path to `medical-journal-article-asset-map/v1`. It binds semantic caption numbers to manifest assets; the build manifest fingerprints its bytes. |
 | `bg_page` | string (hex) | no | Default `#061428` — near-black-navy full-slide background |
 | `header_navy` | string (hex) | no | Default `#0F2847` — mid-navy header band, Part-divider subtitle card |
 | `accent_bright` | string (hex) | no | Default `#A8C5E8` — light-blue accent: title text, Part N numeral, progress-bar fill, stripes on title/thanks |
@@ -161,6 +163,7 @@ minimal.
   "type": "figure",
   "title": "Results: Representative Research Findings",
   "image": "figures/synthetic-multipanel-example.png",
+  "source_asset_id": "figure:1",
   "panel_labels": ["A", "B", "C", "D", "E", "F"],
   "caption": "Figure 1. Fully synthetic examples of the article's key findings.",
   "notes": "【圖片說明 — Figure 1：完全合成的研究圖表示例】\n\n【A 圖】..."
@@ -168,6 +171,10 @@ minimal.
 ```
 
 `caption` is shown below the image in italic small text.
+`source_asset_id` must match the semantic identifier in
+`meta.article_asset_map` (`figure:N` or `table:N`). The caption/title number,
+mapped manifest source, and recursive final-image provenance must agree; an
+extraction filename such as `Figure_05.png` is not itself a semantic number.
 `panel_labels` is optional for figures with no panel letters. For source labels
 that are absent or safely removed from a separate, uniform exterior margin,
 provide `panel_labels` and valid geometry, or omit them from the spec and use

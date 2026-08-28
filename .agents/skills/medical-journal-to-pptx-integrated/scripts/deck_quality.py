@@ -278,6 +278,57 @@ def check_spec(spec_path, rep, *, content_mode="full", style="standard", strict=
                 rep.fail("panel_edge_trim_limit",
                          f"slide {idx} panel {panel_number} exceeds its {edge_limit}px edge limit",
                          "Remove only independently verified thin white/gray edge seams.")
+            verified_limit = sidecar.get("verified_edge_trim_max_px", 12)
+            verified = cleanup.get("verified_edge_trim_px")
+            verified_reason = cleanup.get("verified_edge_trim_reason", "")
+            if verified is not None:
+                valid_verified = (
+                    isinstance(verified, dict)
+                    and set(verified) == {"top", "bottom", "left", "right"}
+                    and isinstance(verified_limit, int)
+                    and not isinstance(verified_limit, bool)
+                    and 0 <= verified_limit <= 12
+                    and all(
+                        isinstance(value, int)
+                        and not isinstance(value, bool)
+                        and 0 <= value <= verified_limit
+                        for value in verified.values()
+                    )
+                )
+                reason_allowed = verified_reason in {
+                    "verified-pdf-exterior-band",
+                    "verified-image-box-correction",
+                    "manual-visual-review",
+                }
+                if not valid_verified or (any(verified.values()) and not reason_allowed):
+                    rep.fail(
+                        "panel_verified_edge_trim",
+                        f"slide {idx} panel {panel_number} has invalid verified edge-trim evidence",
+                        "Regenerate the panel-crop with a bounded trim and an auditable reason.",
+                    )
+                total = cleanup.get("total_edge_trim_px")
+                heuristic = cleanup.get("edge_trim_px") or {}
+                if valid_verified and total is not None and (
+                    not isinstance(total, dict)
+                    or set(total) != {"top", "bottom", "left", "right"}
+                    or any(
+                        total.get(side) != verified[side] + heuristic.get(side, 0)
+                        for side in verified
+                    )
+                ):
+                    rep.fail(
+                        "panel_total_edge_trim",
+                        f"slide {idx} panel {panel_number} total edge-trim metadata is inconsistent",
+                        "Regenerate the recomposed figure instead of editing its sidecar.",
+                    )
+            review = cleanup.get("residual_edge_review")
+            if isinstance(review, dict) and review.get("status") == "needs-review":
+                candidates = review.get("candidates") or {}
+                rep.warn(
+                    "panel_residual_edge_review",
+                    f"slide {idx} panel {panel_number} retains a narrow full-edge bright band: {candidates}",
+                    "Verify the image box or declare a reviewed per-edge trim with panel-crop.",
+                )
             boundary_limit = sidecar.get("max_boundary_shift_px", 24)
             for adjustment in cleanup.get("boundary_adjustments") or []:
                 if (not isinstance(adjustment, dict)

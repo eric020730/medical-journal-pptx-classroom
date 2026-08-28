@@ -2,9 +2,10 @@
 """Post-process final figure/table assets for medical journal PPTX decks.
 
 Commands:
-  trim INPUT OUTPUT [--asset-type figure|table|flowchart|unknown] [--margin N] [--intermediate] [--bg-aware auto|on|off]
+  trim INPUT OUTPUT [--asset-type clinical-image|figure|table|flowchart|unknown] [--margin N] [--intermediate] [--bg-aware auto|on|off]
   labels INPUT OUTPUT --labels A,B,C,D [--asset-type ...] [--margin N] [--intermediate] [--bg-aware auto|on|off]
   microcrop INPUT OUTPUT --px 2
+  seam-review INPUT REPORT OVERLAY --axis x|y --band START END --search START END --selected PX
   same-width OUT_DIR INPUT_A INPUT_B [INPUT_C...]
   recompose-panels OUT --inputs A.png B.png ... --cols N [--gap PX]
   recompose-panels OUT --composite FIG.png --rows R --cols C [--gap PX]
@@ -12,9 +13,11 @@ Commands:
   audit-final ASSET_DIR [--spec SPEC] [--allow-table-margin a.png,b.png]
   notes-audit --spec SPEC [--require-all-notes]
 
-Final raster Figures and Tables default to an exact 16 px safety margin added
-after conservative trimming. Intermediate crops default to 0 px so downstream
-panel recomposition can work from an unpadded core. Tables REFUSE to
+Final non-clinical raster Figures and Tables default to an exact 16 px safety
+margin added after conservative trimming. Final clinical images require a
+0 px outer canvas so the asset contains only verified clinical pixels;
+PowerPoint placement supplies slide-level clearance. Intermediate crops also
+default to 0 px so downstream panel recomposition can work from an unpadded core. Tables REFUSE to
 write a final asset with margin < 8 px unless --intermediate is given (meaning
 a later padding/white-canvas step restores the margin). Use microcrop only for
 non-flowchart figure panels after visual review; never for tables or
@@ -23,6 +26,7 @@ flowcharts.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -43,6 +47,7 @@ POSTPROCESS_SUFFIX = ".postprocess.json"
 # after trimming, so it remains exact even when source content touches an edge.
 FINAL_RASTER_SAFETY_MARGIN_PX = 16
 FIGURE_SAFETY_MARGIN_PX = FINAL_RASTER_SAFETY_MARGIN_PX
+CLINICAL_IMAGE_SAFETY_MARGIN_PX = 0
 TABLE_SAFETY_MARGIN_PX = FINAL_RASTER_SAFETY_MARGIN_PX
 TABLE_MARGIN_MIN = 8
 TABLE_MARGIN_MAX = 24
@@ -331,7 +336,7 @@ def trim_image(
     # broad background refinement after the crop can mistake a meaningful dark
     # diagram/table border newly exposed at the edge for disposable canvas.
     refine_meta = {"bg_aware_applied": False}
-    if asset_type == "figure":
+    if asset_type in {"clinical-image", "figure"}:
         # Clinical figures commonly use a meaningful black/grey acquisition
         # canvas.  Broad background peeling cannot distinguish that canvas
         # from disposable page background, so AUTO deliberately leaves it
@@ -344,7 +349,7 @@ def trim_image(
         refine_meta["detected_bg"] = list(detected)
         if bg_aware == "auto":
             refine_meta["bg_aware_skip_reason"] = (
-                "clinical-figure-auto-preserves-source-canvas"
+                f"{asset_type}-auto-preserves-source-canvas"
             )
         elif bg_aware == "on":
             original = im
@@ -412,7 +417,7 @@ def trim_image(
     # Tables and flowcharts remain untouched. Figure cleanup runs on the core
     # before the safety canvas is added, so the new default margin does not
     # disable the bounded seam protection.
-    if asset_type == "figure":
+    if asset_type in {"clinical-image", "figure"}:
         from recompose_panels_banded import clean_panel_edges
 
         result, edge_trim_px = clean_panel_edges(result, max_edge_px=max_edge_px)
@@ -509,6 +514,442 @@ def microcrop_command(args: argparse.Namespace) -> None:
         px=px, asset_type="figure", intermediate=True,
     )
     print(f"wrote {args.output} ({cropped.width}x{cropped.height}); microcrop_px={px}")
+
+
+PANEL_SEAM_REVIEW_SCHEMA = "medical-journal-panel-seam-review/v1"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def seam_review_command(args: argparse.Namespace) -> None:
+    """Authenticate one reviewed panel seam inside a bounded row or column.
+
+    The score is evidence for visual review, not a semantic panel detector. A
+    selected boundary must coincide with the strongest local raster transition
+    (within the declared tolerance), and the emitted overlay must still be
+    inspected before the report is attached to panel crops.
+    """
+    import numpy as np
+
+    input_path = Path(args.input)
+    report_path = Path(args.report)
+    overlay_path = Path(args.overlay)
+    _assert_distinct_paths(input_path, report_path, overlay_path)
+    if not input_path.is_file():
+        raise SystemExit(f"Seam-review source does not exist: {input_path}")
+
+    with Image.open(input_path) as opened:
+        source = opened.convert("RGB")
+    axis = args.axis
+    dimension = source.width if axis == "x" else source.height
+    perpendicular = source.height if axis == "x" else source.width
+    band_start, band_end = (int(value) for value in args.band)
+    search_start, search_end = (int(value) for value in args.search)
+    selected = int(args.selected)
+    tolerance = int(args.tolerance)
+    if not (0 <= band_start < band_end <= perpendicular):
+        raise SystemExit(
+            f"Seam review band {[band_start, band_end]} is outside the perpendicular "
+            f"dimension {perpendicular}"
+        )
+    if not (1 <= search_start <= search_end < dimension):
+        raise SystemExit(
+            f"Seam review search {[search_start, search_end]} must stay between 1 and "
+            f"{dimension - 1}"
+        )
+    if not search_start <= selected <= search_end:
+        raise SystemExit("Selected seam must fall inside --search")
+    if not 0 <= tolerance <= 4:
+        raise SystemExit("Seam review tolerance must be between 0 and 4 pixels")
+
+    pixels = np.asarray(source, dtype=np.float32)
+    scores: list[tuple[int, float]] = []
+    for candidate in range(search_start, search_end + 1):
+        if axis == "x":
+            delta = np.abs(
+                pixels[band_start:band_end, candidate, :]
+                - pixels[band_start:band_end, candidate - 1, :]
+            )
+        else:
+            delta = np.abs(
+                pixels[candidate, band_start:band_end, :]
+                - pixels[candidate - 1, band_start:band_end, :]
+            )
+        scores.append((candidate, float(delta.mean())))
+    ranked = sorted(scores, key=lambda item: (-item[1], item[0]))
+    best, best_score = ranked[0]
+    selected_score = dict(scores)[selected]
+    selected_rank = next(
+        index for index, (candidate, _) in enumerate(ranked, start=1)
+        if candidate == selected
+    )
+    passed = abs(selected - best) <= tolerance
+
+    overlay = source.copy()
+    draw = ImageDraw.Draw(overlay)
+    if axis == "x":
+        draw.rectangle(
+            (search_start, band_start, search_end, band_end - 1),
+            outline="#E9A23B", width=1,
+        )
+        draw.line((selected, band_start, selected, band_end - 1), fill="#00D26A", width=3)
+    else:
+        draw.rectangle(
+            (band_start, search_start, band_end - 1, search_end),
+            outline="#E9A23B", width=1,
+        )
+        draw.line((band_start, selected, band_end - 1, selected), fill="#00D26A", width=3)
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    overlay.save(overlay_path)
+
+    report = {
+        "schema": PANEL_SEAM_REVIEW_SCHEMA,
+        "status": "pass" if passed else "fail",
+        "source": str(input_path.expanduser().resolve()),
+        "source_sha256": _sha256_file(input_path),
+        "source_size_px": [source.width, source.height],
+        "axis": axis,
+        "band_px": [band_start, band_end],
+        "search_px": [search_start, search_end],
+        "selected_px": selected,
+        "best_px": best,
+        "tolerance_px": tolerance,
+        "selected_rank": selected_rank,
+        "selected_score": round(selected_score, 6),
+        "best_score": round(best_score, 6),
+        "top_candidates": [
+            {"px": candidate, "score": round(score, 6)}
+            for candidate, score in ranked[:8]
+        ],
+        "overlay": str(overlay_path.expanduser().resolve()),
+        "overlay_sha256": _sha256_file(overlay_path),
+        "visual_review_required": True,
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    if not passed:
+        raise SystemExit(
+            f"Selected seam {selected} is not within {tolerance}px of the strongest "
+            f"reviewed transition {best}; inspect {overlay_path}"
+        )
+    print(
+        f"wrote {report_path}; selected_{axis}={selected} best_{axis}={best} "
+        f"band={[band_start, band_end]} overlay={overlay_path}"
+    )
+
+
+def _validated_seam_review(
+    review_value: str,
+    edge: str,
+    input_path: Path,
+    source: Image.Image,
+    box: tuple[int, int, int, int],
+) -> dict:
+    review_path = Path(review_value)
+    try:
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Cannot read seam review {review_path}: {exc}") from None
+    if review.get("schema") != PANEL_SEAM_REVIEW_SCHEMA or review.get("status") != "pass":
+        raise SystemExit("Panel crop requires a passing panel-seam review report")
+    if review.get("source_sha256") != _sha256_file(input_path):
+        raise SystemExit("Seam review source hash does not match panel-crop source")
+    if review.get("source_size_px") != [source.width, source.height]:
+        raise SystemExit("Seam review source dimensions do not match panel-crop source")
+
+    axis = review.get("axis")
+    selected = review.get("selected_px")
+    band = review.get("band_px")
+    search = review.get("search_px")
+    best = review.get("best_px")
+    tolerance = review.get("tolerance_px")
+    overlay_value = review.get("overlay")
+    overlay_hash = review.get("overlay_sha256")
+    dimension = source.width if axis == "x" else source.height
+    perpendicular = source.height if axis == "x" else source.width
+    if (
+        axis not in {"x", "y"}
+        or not isinstance(selected, int) or isinstance(selected, bool)
+        or not isinstance(best, int) or isinstance(best, bool)
+        or not isinstance(tolerance, int) or isinstance(tolerance, bool)
+        or not 0 <= tolerance <= 4
+        or not isinstance(band, list) or len(band) != 2
+        or not isinstance(search, list) or len(search) != 2
+        or not all(isinstance(value, int) and not isinstance(value, bool) for value in [*band, *search])
+        or not 0 <= band[0] < band[1] <= perpendicular
+        or not 1 <= search[0] <= selected <= search[1] < dimension
+        or abs(selected - best) > tolerance
+    ):
+        raise SystemExit("Seam review geometry or transition evidence is inconsistent")
+    if not isinstance(overlay_value, str) or not isinstance(overlay_hash, str):
+        raise SystemExit("Seam review overlay evidence is missing")
+    overlay_path = Path(overlay_value)
+    if not overlay_path.is_file() or _sha256_file(overlay_path) != overlay_hash:
+        raise SystemExit("Seam review overlay evidence is missing or changed")
+
+    import numpy as np
+    pixels = np.asarray(source, dtype=np.float32)
+    recomputed: list[tuple[int, float]] = []
+    for candidate in range(search[0], search[1] + 1):
+        if axis == "x":
+            delta = np.abs(
+                pixels[band[0]:band[1], candidate, :]
+                - pixels[band[0]:band[1], candidate - 1, :]
+            )
+        else:
+            delta = np.abs(
+                pixels[candidate, band[0]:band[1], :]
+                - pixels[candidate - 1, band[0]:band[1], :]
+            )
+        recomputed.append((candidate, float(delta.mean())))
+    recomputed_best = sorted(recomputed, key=lambda item: (-item[1], item[0]))[0][0]
+    if best != recomputed_best:
+        raise SystemExit("Seam review no longer matches the strongest source transition")
+
+    x0, y0, x1, y1 = box
+    if axis == "x":
+        if edge not in {"left", "right"}:
+            raise SystemExit("An x-axis seam can bind only a left or right crop edge")
+        crop_coordinate = x0 if edge == "left" else x1
+        perpendicular_span = [y0, y1]
+    elif axis == "y":
+        if edge not in {"top", "bottom"}:
+            raise SystemExit("A y-axis seam can bind only a top or bottom crop edge")
+        crop_coordinate = y0 if edge == "top" else y1
+        perpendicular_span = [x0, x1]
+    else:
+        raise SystemExit("Seam review has an unsupported axis")
+    if crop_coordinate != selected:
+        raise SystemExit(
+            f"Crop {edge} edge {crop_coordinate} does not match reviewed seam {selected}"
+        )
+    if (
+        not isinstance(band, list) or len(band) != 2
+        or not band[0] <= perpendicular_span[0] < perpendicular_span[1] <= band[1]
+    ):
+        raise SystemExit(
+            f"Crop span {perpendicular_span} is outside reviewed seam band {band}"
+        )
+    return {
+        "schema": PANEL_SEAM_REVIEW_SCHEMA,
+        "report": str(review_path.expanduser().resolve()),
+        "report_sha256": _sha256_file(review_path),
+        "axis": axis,
+        "band_px": band,
+        "selected_px": selected,
+        "edge": edge,
+        "best_px": review.get("best_px"),
+        "selected_rank": review.get("selected_rank"),
+        "visual_review_required": True,
+    }
+
+
+def _validated_seam_reviews(
+    args: argparse.Namespace,
+    input_path: Path,
+    source: Image.Image,
+    box: tuple[int, int, int, int],
+) -> dict[str, dict]:
+    """Validate every seam constraining a panel crop.
+
+    ``argparse`` supplies lists for the repeatable CLI flags, while direct
+    callers from older integrations may still supply one string. Normalize
+    both forms, reject ambiguous pairing, and key the stored evidence by crop
+    edge so one panel can be audited against left/right/top/bottom seams.
+    """
+    review_values = getattr(args, "seam_review", None)
+    edge_values = getattr(args, "seam_edge", None)
+    required = getattr(args, "require_seam_edge", None)
+    if review_values is None and edge_values is None:
+        if required:
+            raise SystemExit(
+                "--require-seam-edge requires matching --seam-review/--seam-edge evidence"
+            )
+        return {}
+    if review_values is None or edge_values is None:
+        raise SystemExit("--seam-review and --seam-edge must be used together")
+    if isinstance(review_values, (str, Path)):
+        review_values = [str(review_values)]
+    if isinstance(edge_values, str):
+        edge_values = [edge_values]
+    if not isinstance(review_values, list) or not isinstance(edge_values, list):
+        raise SystemExit("Seam-review bindings must be repeatable report/edge lists")
+    if len(review_values) != len(edge_values) or not review_values:
+        raise SystemExit(
+            "Each --seam-review requires one matching --seam-edge in the same order"
+        )
+
+    evidence: dict[str, dict] = {}
+    for review_value, edge in zip(review_values, edge_values):
+        if edge in evidence:
+            raise SystemExit(f"Crop edge {edge!r} has more than one seam review")
+        evidence[edge] = _validated_seam_review(
+            str(review_value), str(edge), input_path, source, box
+        )
+
+    if isinstance(required, str):
+        required = [required]
+    if required is not None:
+        if not isinstance(required, list) or any(
+            edge not in {"left", "right", "top", "bottom"} for edge in required
+        ):
+            raise SystemExit("--require-seam-edge contains an unsupported crop edge")
+        if len(set(required)) != len(required):
+            raise SystemExit("--require-seam-edge cannot repeat the same crop edge")
+        missing = sorted(set(required) - set(evidence))
+        if missing:
+            raise SystemExit(
+                "Missing required seam-review evidence for crop edge(s): "
+                + ", ".join(missing)
+            )
+    return evidence
+
+
+def panel_crop_command(args: argparse.Namespace) -> None:
+    """Create one exact, replayable panel crop from an authenticated raster.
+
+    The helper deliberately performs no trimming, padding, painting, or label
+    removal. It only copies the requested source rectangle into an
+    intermediate RGB raster and records enough geometry for deterministic QA
+    replay and the banded recomposer's per-panel label policy. An optional
+    verified edge-trim declaration is metadata for the later recomposer; it
+    never changes this exact crop's pixels.
+    """
+    input_path = Path(args.input)
+    output_path = Path(args.output)
+    _assert_distinct_paths(input_path, output_path)
+    if not input_path.is_file():
+        raise SystemExit(f"Panel-crop source does not exist: {input_path}")
+
+    try:
+        box = tuple(int(value) for value in args.box)
+    except (TypeError, ValueError):
+        raise SystemExit("--box requires four integer pixel coordinates") from None
+    if len(box) != 4:
+        raise SystemExit("--box requires x0 y0 x1 y1")
+
+    with Image.open(input_path) as opened:
+        source = opened.convert("RGB")
+    x0, y0, x1, y1 = box
+    if not (0 <= x0 < x1 <= source.width and 0 <= y0 < y1 <= source.height):
+        raise SystemExit(
+            f"Panel crop {list(box)} is outside source size {source.width}x{source.height}"
+        )
+    seam_reviews = _validated_seam_reviews(args, input_path, source, box)
+    panel = source.crop(box)
+
+    label = (args.label or "").strip()
+    label_box = list(args.label_box) if args.label_box is not None else None
+    image_box = list(args.image_box) if args.image_box is not None else None
+    placement = args.label_placement
+    if label:
+        if placement == "absent":
+            if label_box is not None or image_box is not None:
+                raise SystemExit(
+                    "A verified-absent source label cannot have --label-box or --image-box"
+                )
+        elif label_box is None or image_box is None:
+            raise SystemExit(
+                "A labeled panel crop requires both --label-box and --image-box geometry"
+            )
+        for field, candidate in (("label", label_box), ("image", image_box)):
+            if candidate is None:
+                continue
+            bx0, by0, bx1, by1 = candidate
+            if not (0 <= bx0 < bx1 <= panel.width and 0 <= by0 < by1 <= panel.height):
+                raise SystemExit(
+                    f"Panel {field} box {candidate} is outside crop size "
+                    f"{panel.width}x{panel.height}"
+                )
+    elif label_box is not None or image_box is not None or placement is not None:
+        raise SystemExit("Panel label geometry/placement requires --label")
+
+    verified_edge_trim = getattr(args, "verified_edge_trim", None)
+    verified_edge_trim_reason = getattr(args, "verified_edge_trim_reason", None)
+    if verified_edge_trim is None and verified_edge_trim_reason is not None:
+        raise SystemExit("--verified-edge-trim-reason requires --verified-edge-trim")
+    if verified_edge_trim is not None:
+        if verified_edge_trim_reason is None:
+            raise SystemExit("--verified-edge-trim requires --verified-edge-trim-reason")
+        if verified_edge_trim_reason not in {
+            "verified-pdf-exterior-band",
+            "verified-image-box-correction",
+            "manual-visual-review",
+        }:
+            raise SystemExit("Unsupported verified edge-trim reason")
+        top, bottom, left, right = verified_edge_trim
+        trim_values = {
+            "top": top,
+            "bottom": bottom,
+            "left": left,
+            "right": right,
+        }
+        if any(
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or not 0 <= value <= 12
+            for value in trim_values.values()
+        ):
+            raise SystemExit("Verified edge trims must be integers between 0 and 12")
+        if not any(trim_values.values()):
+            raise SystemExit("Verified edge trim must remove at least one pixel")
+        if left + right >= panel.width or top + bottom >= panel.height:
+            raise SystemExit("Verified edge trims cannot consume the complete panel")
+    else:
+        trim_values = None
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    panel.save(output_path)
+    extra = {
+        "asset_type": "figure",
+        "intermediate": True,
+        "crop_box_px": list(box),
+        "source_size_px": [source.width, source.height],
+        "output_size_px": [panel.width, panel.height],
+        "label_overwritten_pixels": 0,
+    }
+    if label:
+        source_panel_label = {
+            "label": label,
+        }
+        if label_box is not None:
+            source_panel_label["box_px"] = label_box
+        if image_box is not None:
+            source_panel_label["image_box_px"] = image_box
+        if placement is not None and placement != "absent":
+            source_panel_label["placement"] = placement
+        if placement == "absent":
+            source_panel_label["status"] = "verified-absent"
+            source_panel_label["verified_absent"] = True
+            source_panel_label["absence_evidence"] = {
+                "method": "full-panel-decoded-rgb-review-v1",
+                "review_box_px": [0, 0, panel.width, panel.height],
+                "decoded_rgb_sha256": hashlib.sha256(panel.tobytes()).hexdigest(),
+            }
+        elif placement in {"embedded", "external-margin"}:
+            source_panel_label["status"] = "present"
+        elif placement == "unknown":
+            source_panel_label["status"] = "unknown"
+        extra["source_panel_label"] = source_panel_label
+    if trim_values is not None:
+        extra["verified_edge_trim_px"] = trim_values
+        extra["verified_edge_trim_reason"] = verified_edge_trim_reason
+    if seam_reviews:
+        extra["seam_reviews"] = seam_reviews
+        extra["required_seam_edges"] = sorted(seam_reviews)
+    write_postprocess_meta(output_path, "panel-crop", input_path, **extra)
+    print(
+        f"wrote {output_path} ({panel.width}x{panel.height}); "
+        f"source_box={list(box)} label={label or 'none'}"
+    )
 
 
 def same_width_command(args: argparse.Namespace) -> None:
@@ -624,7 +1065,8 @@ def split_table_command(args: argparse.Namespace) -> None:
 def resolve_asset_margin(args: argparse.Namespace) -> int:
     """Resolve the effective trim margin given the asset type.
 
-    Final raster Figures and Tables default to an exact 16 px safety margin.
+    Final non-clinical raster Figures and Tables default to an exact 16 px
+    safety margin. Final clinical images require a 0 px outer canvas.
     Intermediate crops default to 0 unless the caller explicitly requests a
     margin, because panel assembly should receive an unpadded core.
     """
@@ -636,6 +1078,8 @@ def resolve_asset_margin(args: argparse.Namespace) -> int:
     if margin is None:
         if intermediate:
             margin = 0
+        elif asset_type == "clinical-image":
+            margin = CLINICAL_IMAGE_SAFETY_MARGIN_PX
         elif asset_type in {"figure", "flowchart"}:
             margin = FIGURE_SAFETY_MARGIN_PX
         elif asset_type == "table":
@@ -669,6 +1113,15 @@ def resolve_asset_margin(args: argparse.Namespace) -> int:
             f"Final {asset_type} assets require an exact "
             f"{FINAL_RASTER_SAFETY_MARGIN_PX}px safety canvas; received {margin}. "
             "Use --intermediate for a non-final crop."
+        )
+    if (
+        asset_type == "clinical-image"
+        and not intermediate
+        and margin != CLINICAL_IMAGE_SAFETY_MARGIN_PX
+    ):
+        raise SystemExit(
+            "Final clinical-image assets require a 0px outer canvas; "
+            f"received {margin}. Use slide placement—not raster padding—for clearance."
         )
     return margin
 
@@ -799,7 +1252,9 @@ def _padding_pixels_match(
         if alpha.getextrema() != (255, 255):
             return False
     rgb = image.convert("RGB")
-    if margin <= 0 or rgb.width <= 2 * margin or rgb.height <= 2 * margin:
+    if margin == 0:
+        return rgb.width > 0 and rgb.height > 0
+    if margin < 0 or rgb.width <= 2 * margin or rgb.height <= 2 * margin:
         return False
     bands = (
         rgb.crop((0, 0, rgb.width, margin)),
@@ -825,11 +1280,14 @@ def _padding_pixels_match(
 def _core_has_visible_content(
     image: Image.Image, margin: int, background: tuple[int, int, int]
 ) -> bool:
-    if margin <= 0 or image.width <= 2 * margin or image.height <= 2 * margin:
+    if margin < 0 or image.width <= 2 * margin or image.height <= 2 * margin:
         return False
-    core = image.convert("RGB").crop(
-        (margin, margin, image.width - margin, image.height - margin)
-    )
+    if margin == 0:
+        core = image.convert("RGB")
+    else:
+        core = image.convert("RGB").crop(
+            (margin, margin, image.width - margin, image.height - margin)
+        )
     raw = core.tobytes()
     different = 0
     for offset in range(0, len(raw), 3):
@@ -864,7 +1322,7 @@ def validate_final_sidecar(image_path: Path, sidecar: dict) -> list[str]:
         failures.append(f"{prefix} lacks a non-empty source/source_inputs provenance field")
 
     asset_type = sidecar.get("asset_type")
-    if asset_type not in {"figure", "table", "flowchart"}:
+    if asset_type not in {"clinical-image", "figure", "table", "flowchart"}:
         failures.append(f"{prefix} has invalid asset_type={asset_type!r}")
 
     margin = sidecar.get("safety_margin_px")
@@ -875,6 +1333,10 @@ def validate_final_sidecar(image_path: Path, sidecar: dict) -> list[str]:
         failures.append(
             f"{prefix} requires exact {FINAL_RASTER_SAFETY_MARGIN_PX}px safety margin; "
             f"found {margin}"
+        )
+    elif asset_type == "clinical-image" and margin != CLINICAL_IMAGE_SAFETY_MARGIN_PX:
+        failures.append(
+            f"{prefix} clinical-image requires a 0px outer canvas; found {margin}"
         )
     elif asset_type == "table" and not TABLE_MARGIN_MIN <= margin <= TABLE_MARGIN_MAX:
         failures.append(
@@ -937,6 +1399,59 @@ def validate_final_sidecar(image_path: Path, sidecar: dict) -> list[str]:
         )
     if asset_type == "table" and sidecar.get("table_safety_margin_px") != margin:
         failures.append(f"{prefix} table_safety_margin_px must equal safety_margin_px")
+    if sidecar.get("command") == "recompose-panels-banded":
+        label_fields = {
+            field: sidecar.get(field)
+            for field in (
+                "labels",
+                "embedded_labels",
+                "cropped_exterior_labels",
+                "verified_absent_labels",
+                "native_label_values",
+            )
+        }
+        for field, value in label_fields.items():
+            if not (
+                isinstance(value, list)
+                and all(isinstance(item, str) and item.strip() for item in value)
+                and len(value) == len(set(value))
+            ):
+                failures.append(
+                    f"{prefix} {field} must be a unique non-empty string list"
+                )
+        if all(
+            isinstance(value, list)
+            for value in label_fields.values()
+        ):
+            expected = set(label_fields["labels"])
+            embedded = set(label_fields["embedded_labels"])
+            cropped = set(label_fields["cropped_exterior_labels"])
+            absent = set(label_fields["verified_absent_labels"])
+            native = set(label_fields["native_label_values"])
+            if embedded & cropped or embedded & absent or cropped & absent:
+                failures.append(f"{prefix} label provenance groups must be disjoint")
+            if native != cropped | absent:
+                failures.append(
+                    f"{prefix} native labels must equal cropped-exterior plus verified-absent labels"
+                )
+            if expected != embedded | cropped | absent:
+                failures.append(
+                    f"{prefix} every requested panel label needs one resolved provenance state"
+                )
+        geometry = sidecar.get("native_label_geometry")
+        if not isinstance(geometry, list):
+            failures.append(f"{prefix} native_label_geometry must be a list")
+        elif isinstance(label_fields["native_label_values"], list):
+            geometry_labels = [
+                entry.get("label") for entry in geometry if isinstance(entry, dict)
+            ]
+            if (
+                len(geometry_labels) != len(geometry)
+                or geometry_labels != label_fields["native_label_values"]
+            ):
+                failures.append(
+                    f"{prefix} native label geometry must exactly match native_label_values"
+                )
     if not pixel_canvas_ok:
         failures.append(
             f"{prefix} actual outer pixels do not contain the declared safety canvas/background"
@@ -1522,9 +2037,10 @@ def main() -> None:
     trim.add_argument("input")
     trim.add_argument("output")
     trim.add_argument("--margin", type=int, default=None,
-                      help="Exact post-trim safety margin in px. Default 16 for "
-                           "final figures/tables and 0 for intermediate crops.")
-    trim.add_argument("--asset-type", choices=["figure", "table", "flowchart", "unknown"],
+                      help="Exact post-trim safety margin in px. Default 0 for "
+                           "clinical-image, 16 for final figures/tables, and 0 "
+                           "for intermediate crops.")
+    trim.add_argument("--asset-type", choices=["clinical-image", "figure", "table", "flowchart", "unknown"],
                       default="figure",
                       help="Asset class. 'table' enforces an 8-24px safety margin.")
     trim.add_argument("--intermediate", action="store_true",
@@ -1548,9 +2064,10 @@ def main() -> None:
     labels.add_argument("output")
     labels.add_argument("--labels", required=True, help="Comma-separated labels, e.g. A,B,C,D")
     labels.add_argument("--margin", type=int, default=None,
-                        help="Exact post-trim safety margin in px. Default 16 for "
-                             "final figures/tables and 0 for intermediate crops.")
-    labels.add_argument("--asset-type", choices=["figure", "table", "flowchart", "unknown"],
+                        help="Exact post-trim safety margin in px. Default 0 for "
+                             "clinical-image, 16 for final figures/tables, and 0 "
+                             "for intermediate crops.")
+    labels.add_argument("--asset-type", choices=["clinical-image", "figure", "table", "flowchart", "unknown"],
                         default="figure")
     labels.add_argument("--intermediate", action="store_true")
     labels.add_argument("--threshold", type=int, default=246)
@@ -1566,6 +2083,77 @@ def main() -> None:
     micro.add_argument("output")
     micro.add_argument("--px", type=int, default=2)
     micro.set_defaults(func=microcrop_command)
+
+    seam_review = sub.add_parser(
+        "seam-review",
+        help="Authenticate one visually reviewed panel seam within a row or column.",
+    )
+    seam_review.add_argument("input")
+    seam_review.add_argument("report")
+    seam_review.add_argument("overlay")
+    seam_review.add_argument("--axis", choices=("x", "y"), required=True)
+    seam_review.add_argument(
+        "--band", type=int, nargs=2, required=True, metavar=("START", "END")
+    )
+    seam_review.add_argument(
+        "--search", type=int, nargs=2, required=True, metavar=("START", "END")
+    )
+    seam_review.add_argument("--selected", type=int, required=True)
+    seam_review.add_argument("--tolerance", type=int, default=1)
+    seam_review.set_defaults(func=seam_review_command)
+
+    panel_crop = sub.add_parser(
+        "panel-crop",
+        help="Create an exact replayable intermediate crop for one figure panel.",
+    )
+    panel_crop.add_argument("input")
+    panel_crop.add_argument("output")
+    panel_crop.add_argument(
+        "--box", type=int, nargs=4, required=True, metavar=("X0", "Y0", "X1", "Y1")
+    )
+    panel_crop.add_argument("--label", default="")
+    panel_crop.add_argument(
+        "--label-placement",
+        choices=("embedded", "external-margin", "absent", "unknown"),
+        default=None,
+    )
+    panel_crop.add_argument(
+        "--label-box", type=int, nargs=4, metavar=("X0", "Y0", "X1", "Y1")
+    )
+    panel_crop.add_argument(
+        "--image-box", type=int, nargs=4, metavar=("X0", "Y0", "X1", "Y1")
+    )
+    panel_crop.add_argument(
+        "--verified-edge-trim",
+        type=int,
+        nargs=4,
+        metavar=("TOP", "BOTTOM", "LEFT", "RIGHT"),
+        help="Record a reviewed per-edge trim for the banded recomposer; does not alter this exact crop.",
+    )
+    panel_crop.add_argument(
+        "--verified-edge-trim-reason",
+        choices=(
+            "verified-pdf-exterior-band",
+            "verified-image-box-correction",
+            "manual-visual-review",
+        ),
+        help="Auditable reason required with --verified-edge-trim.",
+    )
+    panel_crop.add_argument(
+        "--seam-review",
+        action="append",
+        help="Passing seam-review JSON binding one crop edge; repeat with --seam-edge for every constraining seam.",
+    )
+    panel_crop.add_argument(
+        "--seam-edge", choices=("left", "right", "top", "bottom"), action="append",
+        help="Crop edge constrained by the corresponding --seam-review; repeatable.",
+    )
+    panel_crop.add_argument(
+        "--require-seam-edge", choices=("left", "right", "top", "bottom"),
+        action="append",
+        help="Declare an interior panel boundary that must have replayable seam evidence; repeat for each required edge.",
+    )
+    panel_crop.set_defaults(func=panel_crop_command)
 
     same = sub.add_parser("same-width")
     same.add_argument("out_dir")

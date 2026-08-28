@@ -49,6 +49,7 @@ SCRIPT_ALIASES = {
     "crop_vector_figure": "crop_vector_figure.py",
     "make_demo_paper": "make_demo_paper.py",
     "image_polarity": "image_polarity.py",
+    "article_asset_map": "article_asset_map.py",
     "qa_gate": "qa_gate.py",
     "deck_quality": "deck_quality.py",
 }

@@ -60,6 +60,57 @@ class AssetSafetyTests(unittest.TestCase):
         self.assertFalse(sidecar["bg_aware_applied"])
         self.assertEqual(sidecar["safety_margin_px"], 16)
 
+    def test_clinical_image_preserves_pixels_with_zero_outer_canvas(self) -> None:
+        source = self.dark_clinical_image()
+        output = self.directory / "clinical-final.png"
+        result = self.run_script(
+            POSTPROCESS, "trim", source, output, "--asset-type", "clinical-image"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with Image.open(output) as image:
+            self.assertEqual(image.size, (200, 160))
+            self.assertEqual(image.convert("RGB").tobytes(), Image.open(source).convert("RGB").tobytes())
+        sidecar = json.loads(Path(str(output) + ".postprocess.json").read_text())
+        self.assertEqual(sidecar["asset_type"], "clinical-image")
+        self.assertEqual(sidecar["safety_margin_px"], 0)
+        self.assertEqual(postprocess_assets.validate_final_sidecar(output, sidecar), [])
+
+    def test_final_asset_types_reject_the_wrong_outer_canvas(self) -> None:
+        source = self.dark_clinical_image()
+        clinical = self.run_script(
+            POSTPROCESS, "trim", source, self.directory / "bad-clinical.png",
+            "--asset-type", "clinical-image", "--margin", "16",
+        )
+        figure = self.run_script(
+            POSTPROCESS, "trim", source, self.directory / "bad-figure.png",
+            "--asset-type", "figure", "--margin", "0",
+        )
+        self.assertNotEqual(clinical.returncode, 0)
+        self.assertIn("0px", clinical.stderr + clinical.stdout)
+        self.assertNotEqual(figure.returncode, 0)
+        self.assertIn("16px", figure.stderr + figure.stdout)
+
+    def test_zero_margin_clinical_sidecar_rejects_blank_or_transparent_pixels(self) -> None:
+        base = {
+            "command": "trim", "source": "source.png", "asset_type": "clinical-image",
+            "margin": 0, "safety_margin_px": 0, "padding_background": "#FFFFFF",
+            "unpadded_size_px": [96, 96], "padded_size_px": [96, 96],
+            "intermediate": False,
+        }
+        blank = self.directory / "blank-clinical.png"
+        Image.new("RGB", (96, 96), "white").save(blank)
+        blank_failures = postprocess_assets.validate_final_sidecar(blank, base)
+        self.assertTrue(any("no visible content" in item for item in blank_failures))
+
+        transparent = self.directory / "transparent-clinical.png"
+        rgba = Image.new("RGBA", (96, 96), (20, 30, 40, 255))
+        rgba.putpixel((0, 0), (20, 30, 40, 0))
+        rgba.save(transparent)
+        alpha_failures = postprocess_assets.validate_final_sidecar(
+            transparent, {**base, "padding_background": "#141E28"}
+        )
+        self.assertTrue(any("actual outer pixels" in item for item in alpha_failures))
+
     def test_labels_requires_explicit_cut(self) -> None:
         source = self.dark_clinical_image()
         output = self.directory / "must_not_exist.png"

@@ -10,6 +10,7 @@ import io
 import json
 import math
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ import pymupdf
 from PIL import Image
 
 import vector_table
+import article_asset_map
 
 
 SAMPLE_SIZE = 96
@@ -29,6 +31,7 @@ FINAL_ASSET_INVERSION_THRESHOLD = -0.72
 POSTPROCESS_SUFFIX = ".postprocess.json"
 RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"}
 EXTRACTION_MANIFEST_SCHEMA = "medical-journal-extraction-manifest/v1"
+PANEL_SEAM_REVIEW_SCHEMA = "medical-journal-panel-seam-review/v1"
 SHA256_RE = __import__("re").compile(r"^[0-9a-f]{64}$")
 
 
@@ -859,7 +862,7 @@ def _deterministic_helper_evidence(asset: Path, sidecar: dict[str, Any]) -> tupl
     """Re-run supported single-source raster helpers and require exact decoded pixels."""
     command = sidecar.get("command")
     if command not in {
-        "trim", "labels", "same-width", "split-table", "recompose-panels",
+        "trim", "labels", "panel-crop", "same-width", "split-table", "recompose-panels",
         "recompose-panels-aligned", "recompose-panels-banded", "crop-vector-figure",
     }:
         return False, []
@@ -897,7 +900,7 @@ def _deterministic_helper_evidence(asset: Path, sidecar: dict[str, Any]) -> tupl
                 if not all(
                     isinstance(value, int) and not isinstance(value, bool)
                     for value in (margin, threshold, cut_bottom, bg_tol, max_edge)
-                ) or asset_type not in {"figure", "table", "flowchart"} or bg_aware not in {"auto", "on", "off"}:
+                ) or asset_type not in {"clinical-image", "figure", "table", "flowchart"} or bg_aware not in {"auto", "on", "off"}:
                     return True, [f"Asset {asset.name} has malformed deterministic {command} parameters."]
                 postprocess_assets.trim_image(
                     source,
@@ -911,6 +914,214 @@ def _deterministic_helper_evidence(asset: Path, sidecar: dict[str, Any]) -> tupl
                     asset_type=asset_type,
                     max_edge_px=max_edge,
                 )
+            elif command == "panel-crop":
+                assert source is not None
+                crop_box = sidecar.get("crop_box_px")
+                source_size = sidecar.get("source_size_px")
+                output_size = sidecar.get("output_size_px")
+                if (
+                    not isinstance(crop_box, list)
+                    or len(crop_box) != 4
+                    or not all(
+                        isinstance(value, int) and not isinstance(value, bool)
+                        for value in crop_box
+                    )
+                    or not isinstance(source_size, list)
+                    or len(source_size) != 2
+                    or not all(
+                        isinstance(value, int) and not isinstance(value, bool) and value > 0
+                        for value in source_size
+                    )
+                    or not isinstance(output_size, list)
+                    or len(output_size) != 2
+                    or not all(
+                        isinstance(value, int) and not isinstance(value, bool) and value > 0
+                        for value in output_size
+                    )
+                    or sidecar.get("asset_type") != "figure"
+                    or sidecar.get("intermediate") is not True
+                    or sidecar.get("label_overwritten_pixels") != 0
+                ):
+                    return True, [f"Asset {asset.name} has malformed panel-crop parameters."]
+                verified_trim = sidecar.get("verified_edge_trim_px")
+                verified_reason = sidecar.get("verified_edge_trim_reason")
+                if verified_trim is not None or verified_reason is not None:
+                    valid_verified = (
+                        isinstance(verified_trim, dict)
+                        and set(verified_trim) == {"top", "bottom", "left", "right"}
+                        and all(
+                            isinstance(value, int)
+                            and not isinstance(value, bool)
+                            and 0 <= value <= 12
+                            for value in verified_trim.values()
+                        )
+                        and any(verified_trim.values())
+                        and verified_reason in {
+                            "verified-pdf-exterior-band",
+                            "verified-image-box-correction",
+                            "manual-visual-review",
+                        }
+                    )
+                    if not valid_verified:
+                        return True, [
+                            f"Asset {asset.name} has malformed verified edge-trim evidence."
+                        ]
+                with Image.open(source) as opened:
+                    source_rgb = opened.convert("RGB")
+                if list(source_rgb.size) != source_size:
+                    return True, [f"Asset {asset.name} panel-crop source size has changed."]
+                x0, y0, x1, y1 = crop_box
+                if not (
+                    0 <= x0 < x1 <= source_rgb.width
+                    and 0 <= y0 < y1 <= source_rgb.height
+                ):
+                    return True, [f"Asset {asset.name} panel-crop box is outside its source."]
+                expected_size = [x1 - x0, y1 - y0]
+                if output_size != expected_size:
+                    return True, [f"Asset {asset.name} panel-crop output size is inconsistent."]
+                seam_evidence = sidecar.get("seam_review")
+                seam_evidence_by_edge = sidecar.get("seam_reviews")
+                required_seam_edges = sidecar.get("required_seam_edges")
+                if seam_evidence is not None and seam_evidence_by_edge is not None:
+                    return True, [
+                        f"Asset {asset.name} mixes legacy and multi-seam review evidence."
+                    ]
+                if seam_evidence_by_edge is None and required_seam_edges is not None:
+                    return True, [
+                        f"Asset {asset.name} declares required seam edges without multi-seam evidence."
+                    ]
+                if seam_evidence_by_edge is not None:
+                    valid_edges = {"left", "right", "top", "bottom"}
+                    if (
+                        not isinstance(seam_evidence_by_edge, dict)
+                        or not seam_evidence_by_edge
+                        or not set(seam_evidence_by_edge).issubset(valid_edges)
+                        or not isinstance(required_seam_edges, list)
+                        or len(required_seam_edges) != len(set(required_seam_edges))
+                        or set(required_seam_edges) != set(seam_evidence_by_edge)
+                    ):
+                        return True, [
+                            f"Asset {asset.name} has malformed multi-seam review evidence."
+                        ]
+                    for evidence_edge, evidence in seam_evidence_by_edge.items():
+                        if not isinstance(evidence, dict) or evidence.get("edge") != evidence_edge:
+                            return True, [
+                                f"Asset {asset.name} has a mismatched multi-seam edge binding."
+                            ]
+                        legacy_sidecar = dict(sidecar)
+                        legacy_sidecar.pop("seam_reviews", None)
+                        legacy_sidecar.pop("required_seam_edges", None)
+                        legacy_sidecar["seam_review"] = evidence
+                        handled, seam_failures = _deterministic_helper_evidence(
+                            asset, legacy_sidecar
+                        )
+                        if not handled or seam_failures:
+                            return True, seam_failures or [
+                                f"Asset {asset.name} multi-seam review could not be replayed."
+                            ]
+                    seam_evidence = None
+                if seam_evidence is not None:
+                    if not isinstance(seam_evidence, dict):
+                        return True, [f"Asset {asset.name} has malformed seam-review evidence."]
+                    report_value = seam_evidence.get("report")
+                    report_hash = seam_evidence.get("report_sha256")
+                    edge = seam_evidence.get("edge")
+                    if (
+                        seam_evidence.get("schema") != PANEL_SEAM_REVIEW_SCHEMA
+                        or not isinstance(report_value, str)
+                        or not isinstance(report_hash, str)
+                        or not SHA256_RE.fullmatch(report_hash)
+                        or edge not in {"left", "right", "top", "bottom"}
+                    ):
+                        return True, [f"Asset {asset.name} has malformed seam-review evidence."]
+                    report_path = _resolve_path(report_value, asset.parent)
+                    if not report_path.is_file() or _sha256_file(report_path) != report_hash:
+                        return True, [f"Asset {asset.name} seam-review report is missing or changed."]
+                    try:
+                        report = json.loads(report_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        return True, [f"Asset {asset.name} seam-review report is unreadable."]
+                    axis = report.get("axis")
+                    band = report.get("band_px")
+                    search = report.get("search_px")
+                    selected = report.get("selected_px")
+                    best = report.get("best_px")
+                    tolerance = report.get("tolerance_px")
+                    overlay_value = report.get("overlay")
+                    overlay_hash = report.get("overlay_sha256")
+                    if (
+                        report.get("schema") != PANEL_SEAM_REVIEW_SCHEMA
+                        or report.get("status") != "pass"
+                        or report.get("source_sha256") != _sha256_file(source)
+                        or report.get("source_size_px") != source_size
+                        or axis not in {"x", "y"}
+                        or not isinstance(selected, int)
+                        or isinstance(selected, bool)
+                        or not isinstance(best, int)
+                        or isinstance(best, bool)
+                        or not isinstance(tolerance, int)
+                        or isinstance(tolerance, bool)
+                        or not 0 <= tolerance <= 4
+                        or not isinstance(band, list)
+                        or len(band) != 2
+                        or not all(isinstance(value, int) and not isinstance(value, bool) for value in band)
+                        or not isinstance(search, list)
+                        or len(search) != 2
+                        or not all(isinstance(value, int) and not isinstance(value, bool) for value in search)
+                        or abs(selected - best) > tolerance
+                    ):
+                        return True, [f"Asset {asset.name} seam-review report is inconsistent."]
+                    overlay_path = (
+                        _resolve_path(overlay_value, report_path.parent)
+                        if isinstance(overlay_value, str) else None
+                    )
+                    if (
+                        overlay_path is None
+                        or not overlay_path.is_file()
+                        or not isinstance(overlay_hash, str)
+                        or not SHA256_RE.fullmatch(overlay_hash)
+                        or _sha256_file(overlay_path) != overlay_hash
+                    ):
+                        return True, [f"Asset {asset.name} seam-review overlay is missing or changed."]
+                    dimension = source_rgb.width if axis == "x" else source_rgb.height
+                    perpendicular = source_rgb.height if axis == "x" else source_rgb.width
+                    if (
+                        not 0 <= band[0] < band[1] <= perpendicular
+                        or not 1 <= search[0] <= selected <= search[1] < dimension
+                    ):
+                        return True, [f"Asset {asset.name} seam-review search geometry is invalid."]
+                    pixels = np.asarray(source_rgb, dtype=np.float32)
+                    scores: list[tuple[int, float]] = []
+                    for candidate in range(search[0], search[1] + 1):
+                        if axis == "x":
+                            delta = np.abs(
+                                pixels[band[0]:band[1], candidate, :]
+                                - pixels[band[0]:band[1], candidate - 1, :]
+                            )
+                        else:
+                            delta = np.abs(
+                                pixels[candidate, band[0]:band[1], :]
+                                - pixels[candidate - 1, band[0]:band[1], :]
+                            )
+                        scores.append((candidate, float(delta.mean())))
+                    recomputed_best = sorted(scores, key=lambda item: (-item[1], item[0]))[0][0]
+                    if best != recomputed_best:
+                        return True, [f"Asset {asset.name} seam-review transition no longer replays."]
+                    if axis == "x":
+                        crop_coordinate = x0 if edge == "left" else x1 if edge == "right" else None
+                        perpendicular_span = [y0, y1]
+                    else:
+                        crop_coordinate = y0 if edge == "top" else y1 if edge == "bottom" else None
+                        perpendicular_span = [x0, x1]
+                    if (
+                        crop_coordinate != selected
+                        or not band[0] <= perpendicular_span[0] < perpendicular_span[1] <= band[1]
+                        or seam_evidence.get("axis") != axis
+                        or seam_evidence.get("band_px") != band
+                        or seam_evidence.get("selected_px") != selected
+                    ):
+                        return True, [f"Asset {asset.name} crop does not match its seam review."]
+                source_rgb.crop((x0, y0, x1, y1)).save(regenerated)
             elif command == "same-width":
                 assert source is not None
                 width = sidecar.get("output_width")
@@ -1156,12 +1367,16 @@ def _deterministic_helper_evidence(asset: Path, sidecar: dict[str, Any]) -> tupl
                         for name in required_numbers
                     ) or sidecar.get("requested_source_label_policy") not in {
                         "auto", "preserve", "crop-safe-margin"
+                    } or sidecar.get("asset_type") not in {
+                        "clinical-image", "figure"
                     } or not isinstance(sidecar.get("no_trim"), bool) or not isinstance(
                         sidecar.get("padding_background"), str
                     ):
                         return True, [f"Asset {asset.name} has malformed banded-compositor parameters."]
                     geometry = Path(temporary) / "geometry.json"
                     invocation.extend((
+                        "--asset-type", str(sidecar.get("asset_type", "figure")),
+                        "--layout-template", str(sidecar.get("layout_template", "grid")),
                         "--geometry", str(geometry),
                         "--gap-above-in", str(sidecar["gap_above_in"]),
                         "--gap-below-in", str(sidecar["gap_below_in"]),
@@ -1320,6 +1535,23 @@ def audit_final_assets(spec_path: Path, report: dict[str, Any]) -> dict[str, Any
         return {"ok": False, "checked_assets": 0, "failures": ["Deck specification must contain a slides list."]}
     failures: list[str] = []
     checked = 0
+    map_context: dict[str, Any] | None = None
+    map_usage: dict[str, list[int]] = {}
+    asset_map_path = article_asset_map.map_path_from_spec(spec_path, spec)
+    if asset_map_path is not None:
+        candidate_context = article_asset_map.validate_map(asset_map_path)
+        failures.extend(candidate_context.get("failures", []))
+        if candidate_context.get("ok") is True:
+            map_context = candidate_context
+            audited_pdf = report.get("source_pdf")
+            if (
+                isinstance(audited_pdf, str)
+                and Path(audited_pdf).expanduser().resolve()
+                != candidate_context["source_pdf"]
+            ):
+                failures.append(
+                    "Article asset map source PDF differs from the freshly audited extraction PDF."
+                )
     unsafe = {
         Path(finding["source_path"]).resolve(): finding
         for finding in report_figures
@@ -1388,6 +1620,46 @@ def audit_final_assets(spec_path: Path, report: dict[str, Any]) -> dict[str, Any
         if not isinstance(sidecar, dict):
             failures.append(f"Slide {index}: final image {asset.name} has an invalid sidecar.")
             continue
+        mapped_entry: dict[str, Any] | None = None
+        if map_context is not None:
+            source_asset_id = slide.get("source_asset_id")
+            caption_value = " ".join(
+                str(value) for value in (slide.get("caption"), slide.get("title")) if value
+            )
+            caption_match = re.search(
+                r"\b(Figure|Table)\s*([1-9][0-9]*)\b", caption_value, re.IGNORECASE
+            )
+            if caption_match is not None and not (
+                isinstance(source_asset_id, str) and source_asset_id.strip()
+            ):
+                failures.append(
+                    f"Slide {index}: paper {caption_match.group(1)} {caption_match.group(2)} "
+                    "requires source_asset_id from the article asset map."
+                )
+            if isinstance(source_asset_id, str) and source_asset_id.strip():
+                source_asset_id = source_asset_id.strip()
+                mapped_entry = map_context["assets"].get(source_asset_id)
+                if mapped_entry is None:
+                    failures.append(
+                        f"Slide {index}: source_asset_id {source_asset_id!r} is absent from "
+                        "the article asset map."
+                    )
+                else:
+                    map_usage.setdefault(source_asset_id, []).append(index)
+                    if caption_match is None:
+                        failures.append(
+                            f"Slide {index}: mapped source {source_asset_id} lacks a matching "
+                            "Figure/Table caption or title."
+                        )
+                    else:
+                        caption_id = (
+                            f"{caption_match.group(1).lower()}:{int(caption_match.group(2))}"
+                        )
+                        if caption_id != source_asset_id:
+                            failures.append(
+                                f"Slide {index}: caption identifies {caption_id}, but "
+                                f"source_asset_id is {source_asset_id}."
+                            )
         if suffix in vector_table.VECTOR_SUFFIXES:
             source_pdf = report.get("source_pdf")
             source_pdf_sha256 = report.get("source_pdf_sha256")
@@ -1447,6 +1719,16 @@ def audit_final_assets(spec_path: Path, report: dict[str, Any]) -> dict[str, Any
             allow_document_terminal=allow_direct_pdf,
         )
         failures.extend(f"Slide {index}: {failure}" for failure in provenance_failures)
+        if mapped_entry is not None:
+            expected_terminals = set(mapped_entry.get("resolved_source_bindings", []))
+            actual_terminals = {path for path in provenance if path in trusted}
+            if actual_terminals != expected_terminals:
+                expected_names = ", ".join(sorted(path.name for path in expected_terminals))
+                actual_names = ", ".join(sorted(path.name for path in actual_terminals))
+                failures.append(
+                    f"Slide {index}: {mapped_entry['asset_id']} provenance terminates at "
+                    f"[{actual_names}], expected caption-bound source [{expected_names}]."
+                )
 
         # Unsafe raw streams must be rejected for every asset type, including
         # tables and flowcharts, before any correlation exemptions are applied.
@@ -1561,6 +1843,19 @@ def audit_final_assets(spec_path: Path, report: dict[str, Any]) -> dict[str, Any
                     f"Slide {index} source {candidate.name} is not a readable raster image: {error}."
                 )
         checked += 1
+
+    if map_context is not None:
+        for asset_id, entry in map_context["assets"].items():
+            slides = map_usage.get(asset_id, [])
+            if entry.get("kind") == "figure" and len(slides) != 1:
+                failures.append(
+                    f"Article asset map {asset_id} must appear on exactly one slide; "
+                    f"found {len(slides)}."
+                )
+            elif entry.get("kind") == "table" and not slides:
+                failures.append(
+                    f"Article asset map {asset_id} is not used by any table slide."
+                )
 
     return {"ok": not failures, "checked_assets": checked, "failures": failures}
 

@@ -56,6 +56,14 @@ mutable manifest injection is a blocking failure rather than a warning or
 traceback. Extraction only writes into a new or empty directory and never
 deletes files based on manifest contents.
 
+Because extracted `Figure_XX` names reflect PDF object order, an authenticated
+`article-asset-map.json` separately binds `figure:N`/`table:N` to the semantic
+caption. QA verifies the PDF and manifest hashes, re-extracts normalized caption
+text from its recorded bbox, replays the supported nearest-caption association,
+and compares each slide's `source_asset_id` with recursive provenance terminals.
+The canonical build manifest also fingerprints the map, so a post-build swap or
+mapping edit fails.
+
 Use the rendered `extracted/figures/` image or a verified page render as an
 asset source. Every final raster image used by any slide—including
 `content.image`—requires a neighboring
@@ -86,13 +94,28 @@ stamped with `add_panel_labels.py` before final QA. Figures whose source labels
 overlap image content preserve the original letters and record
 `source_label_policy: preserve`, `native_labels: false`, and `embedded_labels`.
 Mixed figures record `source_label_policy: mixed`, disjoint `embedded_labels`
-and `native_label_values`, and native geometry only for the latter. Source-space
+and `native_label_values`, and native geometry only for the latter. A source
+letter confirmed absent is accepted only when `panel-crop` recorded an
+untampered full-panel decoded-RGB review hash. Embedded, cropped-exterior, and
+verified-absent label groups must be disjoint; native labels equal the latter
+two groups. Source-space
 label/image/crop geometry overrides stale placement flags; exterior labels must
 pass the uniform-margin crop test before receiving `#8FA8C8` native labels.
 The gate rejects duplicate native labels, overwritten clinical image pixels,
 panel-edge cleanup exceeding its recorded per-side limit, and source-row seam
 adjustments lacking a verified embedded-label frame or exceeding their declared
-pixel budget. Speaker notes
+pixel budget. A replayable panel crop stores an edge-keyed set of all declared
+left/right/top/bottom seam reviews; QA rejects missing required edges, duplicate
+edge bindings, changed reports/overlays, mismatched bands, or a crop coordinate
+that does not replay against any attached report. Distinct row/column bands and
+the two sides of a source gutter remain separate evidence. A replayable panel
+crop may declare a separately verified 0–12 px
+edge trim with an allowed audit reason; final QA validates its per-side values,
+reason, and verified + heuristic = total arithmetic. A narrow full-edge bright
+band that exceeds the default heuristic cap and terminates in darker content
+within the review budget is reported as a non-blocking warning instead of
+passing silently. Broad white-background panels are not treated as narrow
+edge-band candidates. Speaker notes
 must reference only labels present in either safe native or preserved source
 metadata. Simplified-only forms, repeated glyph/short-phrase padding,
 non-string notes, missing latter-half content takeaways, and normalized
@@ -102,7 +125,7 @@ values. EMF vector tables bypass only raster padding/polarity fields. They still
 require a typed vector sidecar, the audited extraction manifest and source-PDF
 hash, an authenticated page/bbox, and exact deterministic PDF→SVG→EMF replay.
 
-Final raster Figure/Table sidecars record `safety_margin_px`,
+Final raster sidecars record `asset_type`, `safety_margin_px`,
 `padding_background`, `unpadded_size_px`, and `padded_size_px`. These fields are
 required, strongly typed, dimensionally consistent, and equal to the decoded
 image dimensions. QA also inspects the decoded outer bands and requires their
@@ -111,11 +134,15 @@ nonexistent canvas. Transparency and an all-background/blank unpadded core also
 fail. Supported single-image helpers and all final raster compositors are
 deterministically replayed from their declared source(s); decoded output pixels
 must match exactly, so localized replacement content cannot hide behind a
-global similarity score. The normal
-default is an exact 16 px canvas applied after cleanup; intermediate crops use
-0 px. Multi-panel candidate fits and native-label anchors must be derived from
-the padded composite dimensions, never from coordinates calculated before an
-after-the-fact border was added.
+global similarity score. Final clinical images require 0 px; nonclinical
+figures/flowcharts require exactly 16 px; raster tables require white 8–24 px
+(default 16); intermediate crops use 0 px. Multi-panel candidate fits and
+native-label anchors must be derived from the final composite dimensions, never
+from coordinates calculated before an after-the-fact border was added. The
+reviewed `left-span-2x2` template is restricted to five preserved-label panels
+and is replayed like every other compositor. The mirrored `right-span-2x2`
+template keeps panel 3 as a full-height right span without changing semantic
+input order and follows the same restrictions.
 
 The expected logo is resolved from `meta.logo_path` with the same fallback used
 by the builder; custom authorized logos are hashed and validated instead of

@@ -13,8 +13,9 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 import build_deck
+import image_polarity
 from postprocess_assets import content_bbox as content_bbox_for_test
-from recompose_panels_banded import clean_panel_edges
+from recompose_panels_banded import clean_panel_edges, residual_edge_review
 
 
 SCRIPT = Path(__file__).with_name("recompose_panels_banded.py")
@@ -112,6 +113,31 @@ class PanelLayoutTests(unittest.TestCase):
 
         self.assertEqual((result["rows"], result["cols"]), (2, 2))
 
+    def test_clinical_grid_rows_fill_right_edge_without_external_canvas(self) -> None:
+        inputs = []
+        for index, size in enumerate(((301, 241), (319, 243), (337, 245),
+                                      (307, 239), (323, 247), (341, 251))):
+            path = self.directory / f"rounding-{index}.png"
+            Image.new("RGB", size, (40 + index * 20, 75, 115)).save(path)
+            inputs.append(path)
+
+        output, sidecar, _ = self.compose_inputs(
+            inputs, "--asset-type", "clinical-image", "--cols", "3", "--no-trim"
+        )
+
+        width, _ = sidecar["padded_size_px"]
+        boxes = sidecar["panel_boxes_px"]
+        self.assertEqual(sidecar["safety_margin_px"], 0)
+        self.assertEqual(boxes[2]["x"] + boxes[2]["w"], width)
+        self.assertEqual(boxes[5]["x"] + boxes[5]["w"], width)
+        with Image.open(output) as composed:
+            rgb = composed.convert("RGB")
+            self.assertNotEqual(rgb.getpixel((width - 1, boxes[2]["h"] // 2)), (6, 20, 40))
+            self.assertNotEqual(
+                rgb.getpixel((width - 1, boxes[5]["y"] + boxes[5]["h"] // 2)),
+                (6, 20, 40),
+            )
+
     def test_explicit_columns_remain_manual_override(self) -> None:
         result = self.compose(600, 800, "--cols", "2")
 
@@ -172,6 +198,24 @@ class PanelLayoutTests(unittest.TestCase):
         self.assertEqual(edges["top"], 0)
         self.assertEqual(cleaned.size, image.size)
         self.assertEqual(cleaned.getpixel((60, 0)), (245, 245, 245))
+
+    def test_five_pixel_white_edge_is_reported_for_review_without_auto_crop(self) -> None:
+        image = Image.new("RGB", (120, 100), (7, 7, 7))
+        ImageDraw.Draw(image).rectangle((0, 95, 119, 99), fill=(252, 252, 252))
+
+        cleaned, edges = clean_panel_edges(image, max_edge_px=4)
+        review = residual_edge_review(cleaned, max_edge_px=4)
+
+        self.assertEqual(edges["bottom"], 0)
+        self.assertEqual(review["status"], "needs-review")
+        self.assertEqual(review["candidates"]["bottom"]["depth_px"], 5)
+
+    def test_broad_white_background_is_not_misreported_as_a_narrow_edge(self) -> None:
+        image = Image.new("RGB", (120, 100), (252, 252, 252))
+
+        review = residual_edge_review(image, max_edge_px=4)
+
+        self.assertEqual(review, {"status": "clear", "candidates": {}})
 
     def test_white_seam_before_uniform_gray_mri_content_stops_at_content(self) -> None:
         image = Image.new("RGB", (120, 100), (90, 90, 90))
@@ -693,6 +737,32 @@ class PanelLayoutTests(unittest.TestCase):
         self.assertEqual(cleanup["edge_trim_px"]["top"], 2)
         self.assertLess(Image.open(output).convert("RGB").getpixel((0, 0))[0], 20)
 
+    def test_verified_per_edge_trim_removes_five_pixel_exterior_band(self) -> None:
+        source = self.directory / "verified_bottom_band_A.png"
+        image = Image.new("RGB", (160, 140), (248, 248, 248))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 20, 159, 139), fill=(12, 12, 12))
+        draw.rectangle((0, 135, 159, 139), fill=(252, 252, 252))
+        draw.text((9, 3), "A", fill=(0, 0, 0))
+        image.save(source)
+        Path(str(source) + ".postprocess.json").write_text(json.dumps({
+            "source_panel_label": {
+                "placement": "external-margin",
+                "box_px": [6, 2, 28, 18],
+                "image_box_px": [0, 20, 160, 140],
+            },
+            "verified_edge_trim_px": {"top": 0, "bottom": 5, "left": 0, "right": 0},
+            "verified_edge_trim_reason": "verified-pdf-exterior-band",
+        }))
+
+        _, sidecar, _ = self.compose_inputs([source])
+
+        cleanup = sidecar["panel_cleanup"][0]
+        self.assertEqual(cleanup["verified_edge_trim_px"]["bottom"], 5)
+        self.assertEqual(cleanup["edge_trim_px"]["bottom"], 0)
+        self.assertEqual(cleanup["total_edge_trim_px"]["bottom"], 5)
+        self.assertEqual(cleanup["residual_edge_review"]["status"], "clear")
+
     def test_source_geometry_overrides_stale_exterior_flag_for_embedded_label(self) -> None:
         source = self.directory / "stale_exterior_A.png"
         image = Image.new("RGB", (160, 120), (7, 7, 7))
@@ -780,6 +850,8 @@ class PanelLayoutTests(unittest.TestCase):
             "--source-label-policy",
             "preserve",
             "--no-trim",
+            "--asset-type",
+            "clinical-image",
             "--safety-margin-px",
             "0",
         )
@@ -787,7 +859,197 @@ class PanelLayoutTests(unittest.TestCase):
         with Image.open(output) as composite:
             self.assertEqual(composite.size, image.size)
         self.assertEqual(sidecar["safety_margin_px"], 0)
+        self.assertEqual(sidecar["asset_type"], "clinical-image")
         self.assertEqual(geometry[output.stem], [])
+
+    def test_verified_absent_label_evidence_adds_one_native_label(self) -> None:
+        source = self.directory / "absent-source.png"
+        Image.new("RGB", (180, 120), (20, 50, 90)).save(source)
+        panel = self.directory / "absent-panel.png"
+        crop = subprocess.run([
+            sys.executable, str(POSTPROCESS), "panel-crop", str(source), str(panel),
+            "--box", "0", "0", "180", "120",
+            "--label", "A", "--label-placement", "absent",
+        ], capture_output=True, text=True)
+        self.assertEqual(crop.returncode, 0, crop.stderr + crop.stdout)
+
+        output, sidecar, geometry = self.compose_inputs(
+            [panel], "--asset-type", "clinical-image", "--no-trim"
+        )
+
+        self.assertEqual(sidecar["verified_absent_labels"], ["A"])
+        self.assertEqual(sidecar["native_label_values"], ["A"])
+        self.assertEqual(sidecar["embedded_labels"], [])
+        self.assertEqual(
+            sidecar["panel_cleanup"][0]["label_action"],
+            "native-from-verified-absence",
+        )
+        self.assertEqual([entry["label"] for entry in geometry[output.stem]], ["A"])
+
+        panel_sidecar_path = Path(str(panel) + ".postprocess.json")
+        panel_sidecar = json.loads(panel_sidecar_path.read_text())
+        panel_sidecar["source_panel_label"]["absence_evidence"][
+            "decoded_rgb_sha256"
+        ] = "0" * 64
+        panel_sidecar_path.write_text(json.dumps(panel_sidecar))
+        failed = subprocess.run([
+            sys.executable, str(SCRIPT), str(self.directory / "tampered.png"),
+            "--inputs", str(panel), "--labels", "A",
+            "--geometry", str(self.directory / "tampered-geometry.json"),
+            "--asset-type", "clinical-image", "--no-trim",
+        ], capture_output=True, text=True)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("review evidence", failed.stderr + failed.stdout)
+
+    def test_verified_absent_label_rejects_present_label_geometry(self) -> None:
+        source = self.directory / "absent-with-box-source.png"
+        Image.new("RGB", (180, 120), (20, 50, 90)).save(source)
+        result = subprocess.run([
+            sys.executable, str(POSTPROCESS), "panel-crop", str(source),
+            str(self.directory / "absent-with-box.png"),
+            "--box", "0", "0", "180", "120",
+            "--label", "A", "--label-placement", "absent",
+            "--label-box", "2", "2", "20", "20",
+            "--image-box", "0", "0", "180", "120",
+        ], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot have", result.stderr + result.stdout)
+
+    def test_left_span_2x2_template_rearranges_five_embedded_panels(self) -> None:
+        panels = []
+        sizes = [(320, 500), (420, 300), (430, 300), (420, 290), (430, 290)]
+        for index, size in enumerate(sizes):
+            path = self.directory / f"span-{index}.png"
+            Image.new("RGB", size, (30 + index * 25, 55, 95)).save(path)
+            Path(str(path) + ".postprocess.json").write_text(json.dumps({
+                "source_panel_label": {
+                    "label": chr(ord("A") + index),
+                    "status": "present",
+                    "placement": "embedded",
+                    "box_px": [size[0] - 30, size[1] - 30, size[0] - 5, size[1] - 5],
+                    "image_box_px": [0, 0, size[0], size[1]],
+                },
+            }))
+            panels.append(path)
+
+        output, sidecar, geometry = self.compose_inputs(
+            panels,
+            "--asset-type", "clinical-image",
+            "--layout-template", "left-span-2x2",
+            "--source-label-policy", "preserve",
+            "--no-trim",
+        )
+
+        boxes = sidecar["panel_boxes_px"]
+        self.assertEqual(sidecar["layout_mode"], "template")
+        self.assertEqual(sidecar["layout_template"], "left-span-2x2")
+        self.assertEqual(sidecar["safety_margin_px"], 0)
+        self.assertEqual(boxes[0]["y"], 0)
+        self.assertEqual(boxes[0]["h"], sidecar["padded_size_px"][1])
+        self.assertEqual(boxes[1]["y"], boxes[2]["y"])
+        self.assertEqual(boxes[3]["y"], boxes[4]["y"])
+        self.assertGreater(boxes[3]["y"], boxes[1]["y"])
+        self.assertEqual(geometry[output.stem], [])
+
+    def test_right_span_2x2_preserves_cross_row_source_topology_and_aspect(self) -> None:
+        panels = []
+        sizes = [(320, 265), (290, 265), (425, 527), (320, 262), (290, 262)]
+        for index, size in enumerate(sizes):
+            path = self.directory / f"right-span-{index}.png"
+            Image.new("RGB", size, (30 + index * 25, 60, 100)).save(path)
+            Path(str(path) + ".postprocess.json").write_text(json.dumps({
+                "source_panel_label": {
+                    "label": chr(ord("A") + index),
+                    "status": "present",
+                    "placement": "embedded",
+                    "box_px": [4, size[1] - 34, 30, size[1] - 4],
+                    "image_box_px": [0, 0, size[0], size[1]],
+                },
+            }))
+            panels.append(path)
+
+        output, sidecar, geometry = self.compose_inputs(
+            panels,
+            "--asset-type", "clinical-image",
+            "--layout-template", "right-span-2x2",
+            "--source-label-policy", "preserve",
+            "--no-trim",
+        )
+
+        boxes = sidecar["panel_boxes_px"]
+        canvas_width, canvas_height = sidecar["padded_size_px"]
+        self.assertEqual(sidecar["layout_mode"], "template")
+        self.assertEqual(sidecar["layout_template"], "right-span-2x2")
+        self.assertEqual((sidecar["rows"], sidecar["cols"]), (2, 3))
+        self.assertEqual(boxes[0]["y"], boxes[1]["y"])
+        self.assertEqual(boxes[3]["y"], boxes[4]["y"])
+        self.assertGreater(boxes[3]["y"], boxes[0]["y"])
+        self.assertEqual(boxes[2]["y"], 0)
+        self.assertEqual(boxes[2]["h"], canvas_height)
+        self.assertEqual(boxes[2]["x"] + boxes[2]["w"], canvas_width)
+        self.assertGreater(boxes[2]["x"], boxes[1]["x"])
+        for source_size, box in zip(sizes, boxes):
+            source_ratio = source_size[0] / source_size[1]
+            output_ratio = box["w"] / box["h"]
+            self.assertLess(abs(output_ratio / source_ratio - 1.0), 0.006)
+        self.assertEqual(geometry[output.stem], [])
+
+        handled, failures = image_polarity._deterministic_helper_evidence(output, sidecar)
+        self.assertTrue(handled)
+        self.assertFalse(failures)
+
+    def test_two_span_right_stack_preserves_aspect_and_relative_scale(self) -> None:
+        panels = []
+        sizes = [(316, 510), (322, 510), (393, 265), (393, 245)]
+        for index, size in enumerate(sizes):
+            path = self.directory / f"two-span-{index}.png"
+            Image.new("RGB", size, (35 + index * 30, 65, 100)).save(path)
+            Path(str(path) + ".postprocess.json").write_text(json.dumps({
+                "source_panel_label": {
+                    "label": chr(ord("A") + index),
+                    "status": "present",
+                    "placement": "embedded",
+                    "box_px": [4, size[1] - 34, 30, size[1] - 4],
+                    "image_box_px": [0, 0, size[0], size[1]],
+                },
+            }))
+            panels.append(path)
+
+        output, sidecar, geometry = self.compose_inputs(
+            panels,
+            "--asset-type", "clinical-image",
+            "--layout-template", "two-span-right-stack",
+            "--source-label-policy", "preserve",
+            "--no-trim",
+        )
+
+        boxes = sidecar["panel_boxes_px"]
+        canvas_width, canvas_height = sidecar["padded_size_px"]
+        self.assertEqual(sidecar["layout_mode"], "template")
+        self.assertEqual(sidecar["layout_template"], "two-span-right-stack")
+        self.assertEqual((sidecar["rows"], sidecar["cols"]), (2, 3))
+        self.assertEqual(boxes[0]["y"], 0)
+        self.assertEqual(boxes[1]["y"], 0)
+        self.assertEqual(boxes[0]["h"], canvas_height)
+        self.assertEqual(boxes[1]["h"], canvas_height)
+        self.assertEqual(boxes[2]["x"], boxes[3]["x"])
+        self.assertEqual(boxes[2]["w"], boxes[3]["w"])
+        self.assertEqual(boxes[3]["y"], boxes[2]["h"] + sidecar["gap"])
+        self.assertEqual(boxes[3]["y"] + boxes[3]["h"], canvas_height)
+        self.assertEqual(boxes[3]["x"] + boxes[3]["w"], canvas_width)
+        for source_size, box in zip(sizes, boxes):
+            source_ratio = source_size[0] / source_size[1]
+            output_ratio = box["w"] / box["h"]
+            self.assertLess(abs(output_ratio / source_ratio - 1.0), 0.006)
+        source_relative_height = sizes[3][1] / sizes[0][1]
+        output_relative_height = boxes[3]["h"] / boxes[0]["h"]
+        self.assertLess(abs(output_relative_height - source_relative_height), 0.05)
+        self.assertLess(output_relative_height, 0.60)
+        self.assertEqual(geometry[output.stem], [])
+
+        handled, failures = image_polarity._deterministic_helper_evidence(output, sidecar)
+        self.assertTrue(handled)
+        self.assertFalse(failures)
 
     def test_panel_with_solid_corner_mask_is_rejected_against_its_source_crop(self) -> None:
         original_path = self.directory / "verified_source.png"

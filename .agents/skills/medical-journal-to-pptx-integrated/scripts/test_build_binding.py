@@ -14,7 +14,7 @@ from unittest import mock
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE, MSO_SHAPE_TYPE
 from pptx.dml.color import RGBColor
@@ -668,6 +668,37 @@ class BuildBindingTests(unittest.TestCase):
         self.assertTrue(
             any("padded_size_px" in failure for failure in report["failures"]),
             report["failures"],
+        )
+
+    def test_qa_warns_on_narrow_residual_full_edge_bright_band(self) -> None:
+        panel = self.root / "residual-panel.png"
+        image = Image.new("RGB", (160, 120), (10, 10, 10))
+        ImageDraw.Draw(image).rectangle((0, 115, 159, 119), fill=(252, 252, 252))
+        image.save(panel)
+        final = self.root / "residual-composite.png"
+        subprocess.run([
+            sys.executable,
+            str(Path(__file__).with_name("recompose_panels_banded.py")),
+            str(final),
+            "--inputs", str(panel),
+            "--geometry", str(self.root / "residual-geometry.json"),
+        ], check=True, capture_output=True, text=True)
+        value = valid_spec()
+        value["slides"][3] = {
+            "type": "figure",
+            "title": "Figure 1. Synthetic edge review",
+            "image": final.name,
+            "caption": "Figure 1. Synthetic edge-review example.",
+            "notes": "🖼️ 本頁說明合成影像的邊緣檢查結果與保守裁切限制，協助確認來源像素完整性。",
+        }
+        spec_path = self.write_spec(value)
+
+        report = qa_check.validate_specification(spec_path, audit_images=False)
+
+        self.assertTrue(report["ok"], report["failures"])
+        self.assertTrue(
+            any("retains a narrow full-edge bright band" in warning for warning in report["warnings"]),
+            report["warnings"],
         )
 
     def test_vector_only_slide_requires_extraction_manifest_before_qa_or_build(self) -> None:

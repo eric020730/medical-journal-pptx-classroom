@@ -22,6 +22,7 @@ from pptx import Presentation
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import extract_from_pdf
+import article_asset_map
 import build_deck
 import image_polarity
 import postprocess_assets
@@ -54,6 +55,87 @@ class ProvenanceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_article_asset_map_uses_caption_geometry_not_extraction_order(self) -> None:
+        pdf = self.root / "paper.pdf"
+        upper = self.root / "figures" / "Figure_05.png"
+        lower = self.root / "figures" / "Figure_04.png"
+        upper.parent.mkdir()
+        Image.new("RGB", (300, 150), (30, 70, 120)).save(upper)
+        Image.new("RGB", (300, 160), (120, 70, 30)).save(lower)
+        document = pymupdf.open()
+        page = document.new_page(width=450, height=650)
+        page.insert_image(pymupdf.Rect(50, 50, 350, 200), filename=str(upper))
+        page.insert_text((50, 220), "Figure 4. Upper clinical image.", fontsize=10)
+        page.insert_image(pymupdf.Rect(50, 280, 350, 440), filename=str(lower))
+        page.insert_text((50, 460), "Figure 5. Lower clinical image.", fontsize=10)
+        document.save(pdf)
+        document.close()
+
+        pdf_hash = hashlib.sha256(pdf.read_bytes()).hexdigest()
+        manifest = self.root / "manifest.json"
+        manifest_value = {
+            "schema": article_asset_map.EXTRACTION_SCHEMA,
+            "pdf": str(pdf),
+            "pdf_sha256": pdf_hash,
+            "page_count": 1,
+            # Deliberately use object/extraction names that do not equal article numbers.
+            "figures": [
+                {
+                    "page": 1, "file": "figures/Figure_05.png",
+                    "bbox_pt": {"x0": 50, "y0": 50, "x1": 350, "y1": 200},
+                    "sha256": hashlib.sha256(upper.read_bytes()).hexdigest(),
+                },
+                {
+                    "page": 1, "file": "figures/Figure_04.png",
+                    "bbox_pt": {"x0": 50, "y0": 280, "x1": 350, "y1": 440},
+                    "sha256": hashlib.sha256(lower.read_bytes()).hexdigest(),
+                },
+            ],
+            "tables": [],
+        }
+        manifest.write_text(json.dumps(manifest_value))
+        caption_box = [45, 205, 390, 226]
+        with pymupdf.open(pdf) as opened:
+            caption_text = article_asset_map.normalize_caption(
+                opened[0].get_text("text", clip=pymupdf.Rect(*caption_box), sort=True)
+            )
+        mapping_path = self.root / "article-asset-map.json"
+        mapping = {
+            "schema": article_asset_map.SCHEMA,
+            "source_pdf": str(pdf),
+            "source_pdf_sha256": pdf_hash,
+            "extraction_manifest": str(manifest),
+            "extraction_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            "assets": [{
+                "asset_id": "figure:4", "kind": "figure", "number": "4",
+                "caption_evidence": {
+                    "page": 1, "bbox_pt": caption_box,
+                    "normalized_text": caption_text,
+                    "normalized_text_sha256": article_asset_map.caption_sha256(caption_text),
+                    "normalizer": article_asset_map.NORMALIZER,
+                },
+                "source_bindings": [{
+                    "manifest_collection": "figures",
+                    "manifest_file": "figures/Figure_05.png",
+                    "sha256": manifest_value["figures"][0]["sha256"],
+                    "page": 1,
+                }],
+                "association": {"method": "nearest-preceding-x-overlap-v1"},
+            }],
+        }
+        mapping_path.write_text(json.dumps(mapping))
+
+        self.assertTrue(article_asset_map.validate_map(mapping_path)["ok"])
+
+        mapping["assets"][0]["source_bindings"][0].update({
+            "manifest_file": "figures/Figure_04.png",
+            "sha256": manifest_value["figures"][1]["sha256"],
+        })
+        mapping_path.write_text(json.dumps(mapping))
+        result = article_asset_map.validate_map(mapping_path)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("deterministic" in item for item in result["failures"]))
 
     def test_shared_dag_is_not_a_cycle(self) -> None:
         terminal = self.root / "rendered.png"
@@ -178,6 +260,295 @@ class ProvenanceTests(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertTrue(any("deterministic replay" in item for item in result["failures"]))
+
+    def test_panel_crop_exact_replay_passes_and_tampering_fails(self) -> None:
+        source = self.root / "authenticated-figure.png"
+        image = Image.new("RGB", (180, 120), "white")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((10, 10, 80, 110), fill=(25, 75, 130))
+        draw.ellipse((100, 15, 170, 105), fill=(145, 70, 35))
+        image.save(source)
+        panel = self.root / "panel-a.png"
+        postprocess_assets.panel_crop_command(argparse.Namespace(
+            input=str(source), output=str(panel), box=[0, 0, 90, 120],
+            label="", label_box=None, image_box=None, label_placement=None,
+        ))
+        sidecar = json.loads(
+            panel.with_suffix(panel.suffix + image_polarity.POSTPROCESS_SUFFIX).read_text()
+        )
+
+        handled, failures = image_polarity._deterministic_helper_evidence(panel, sidecar)
+
+        self.assertTrue(handled)
+        self.assertFalse(failures)
+        self.assertEqual(sidecar["crop_box_px"], [0, 0, 90, 120])
+        self.assertEqual(sidecar["output_size_px"], [90, 120])
+
+        with Image.open(panel) as opened:
+            altered = opened.convert("RGB")
+        ImageDraw.Draw(altered).point((45, 60), fill=(255, 0, 255))
+        altered.save(panel)
+        _, tampered = image_polarity._deterministic_helper_evidence(panel, sidecar)
+        self.assertTrue(any("deterministic replay" in item for item in tampered))
+
+    def test_figure16_row_specific_seam_reviews_reject_shared_split_and_cross_row_reuse(self) -> None:
+        source = self.root / "unequal-row-grid.png"
+        image = Image.new("RGB", (140, 80), (0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 57, 39), fill=(20, 40, 60))
+        draw.rectangle((58, 0, 139, 39), fill=(235, 210, 185))
+        draw.rectangle((0, 40, 75, 79), fill=(30, 50, 70))
+        draw.rectangle((76, 40, 139, 79), fill=(225, 200, 175))
+        image.save(source)
+
+        top_report = self.root / "top-seam.json"
+        top_overlay = self.root / "top-seam.png"
+        postprocess_assets.seam_review_command(argparse.Namespace(
+            input=str(source), report=str(top_report), overlay=str(top_overlay),
+            axis="x", band=[0, 40], search=[45, 85], selected=58, tolerance=1,
+        ))
+        bottom_report = self.root / "bottom-seam.json"
+        bottom_overlay = self.root / "bottom-seam.png"
+        postprocess_assets.seam_review_command(argparse.Namespace(
+            input=str(source), report=str(bottom_report), overlay=str(bottom_overlay),
+            axis="x", band=[40, 80], search=[45, 85], selected=76, tolerance=1,
+        ))
+        self.assertEqual(json.loads(top_report.read_text())["best_px"], 58)
+        self.assertEqual(json.loads(bottom_report.read_text())["best_px"], 76)
+
+        with self.assertRaises(SystemExit):
+            postprocess_assets.seam_review_command(argparse.Namespace(
+                input=str(source), report=str(self.root / "equal-split.json"),
+                overlay=str(self.root / "equal-split.png"), axis="x",
+                band=[0, 40], search=[45, 85], selected=70, tolerance=1,
+            ))
+
+        top_left = self.root / "top-left.png"
+        postprocess_assets.panel_crop_command(argparse.Namespace(
+            input=str(source), output=str(top_left), box=[0, 0, 58, 40],
+            label="", label_box=None, image_box=None, label_placement=None,
+            seam_review=str(top_report), seam_edge="right",
+        ))
+        sidecar = json.loads(
+            top_left.with_suffix(top_left.suffix + image_polarity.POSTPROCESS_SUFFIX).read_text()
+        )
+        self.assertEqual(sidecar["seam_reviews"]["right"]["selected_px"], 58)
+        self.assertEqual(sidecar["seam_reviews"]["right"]["edge"], "right")
+        self.assertEqual(sidecar["required_seam_edges"], ["right"])
+        handled, failures = image_polarity._deterministic_helper_evidence(top_left, sidecar)
+        self.assertTrue(handled)
+        self.assertFalse(failures)
+
+        top_report.write_text(
+            top_report.read_text().replace('"selected_px": 58', '"selected_px": 70')
+        )
+        _, changed_report = image_polarity._deterministic_helper_evidence(top_left, sidecar)
+        self.assertTrue(any("seam-review report" in item for item in changed_report))
+
+        with self.assertRaises(SystemExit):
+            postprocess_assets.panel_crop_command(argparse.Namespace(
+                input=str(source), output=str(self.root / "bad-bottom.png"),
+                box=[0, 40, 58, 80], label="", label_box=None,
+                image_box=None, label_placement=None,
+                seam_review=str(top_report), seam_edge="right",
+            ))
+
+    def test_figure6_nonshared_horizontal_seams_bind_every_panel_edge(self) -> None:
+        source = self.root / "figure6-synthetic-grid.png"
+        image = Image.new("RGB", (180, 82), (0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        splits = [40, 41, 42]
+        top_colors = [(20, 45, 70), (115, 55, 30), (35, 105, 75)]
+        bottom_colors = [(210, 185, 150), (45, 75, 145), (165, 65, 125)]
+        for column, (x0, x1) in enumerate(((0, 60), (60, 120), (120, 180))):
+            split = splits[column]
+            draw.rectangle((x0, 0, x1 - 1, split - 1), fill=top_colors[column])
+            draw.rectangle((x0, split, x1 - 1, 81), fill=bottom_colors[column])
+        image.save(source)
+
+        def review(name: str, axis: str, band: list[int], search: list[int], selected: int) -> Path:
+            report = self.root / f"figure6-{name}.json"
+            postprocess_assets.seam_review_command(argparse.Namespace(
+                input=str(source), report=str(report),
+                overlay=str(self.root / f"figure6-{name}.png"),
+                axis=axis, band=band, search=search,
+                selected=selected, tolerance=0,
+            ))
+            return report
+
+        left = review("top-ab", "x", [0, 41], [58, 62], 60)
+        right = review("top-bc", "x", [0, 41], [118, 122], 120)
+        bottom = review("middle-be", "y", [60, 120], [39, 43], 41)
+
+        panel_b = self.root / "figure6-panel-b.png"
+        postprocess_assets.panel_crop_command(argparse.Namespace(
+            input=str(source), output=str(panel_b), box=[60, 0, 120, 41],
+            label="", label_box=None, image_box=None, label_placement=None,
+            seam_review=[str(left), str(right), str(bottom)],
+            seam_edge=["left", "right", "bottom"],
+            require_seam_edge=["left", "right", "bottom"],
+        ))
+        sidecar = json.loads(
+            panel_b.with_suffix(panel_b.suffix + image_polarity.POSTPROCESS_SUFFIX).read_text()
+        )
+        self.assertEqual(set(sidecar["seam_reviews"]), {"left", "right", "bottom"})
+        self.assertEqual(
+            sidecar["required_seam_edges"], ["bottom", "left", "right"]
+        )
+        handled, failures = image_polarity._deterministic_helper_evidence(panel_b, sidecar)
+        self.assertTrue(handled)
+        self.assertFalse(failures)
+
+        with self.assertRaises(SystemExit):
+            review("wrong-common-row", "y", [60, 120], [39, 43], 40)
+
+        with self.assertRaises(SystemExit):
+            postprocess_assets.panel_crop_command(argparse.Namespace(
+                input=str(source), output=str(self.root / "figure6-missing-edge.png"),
+                box=[60, 0, 120, 41], label="", label_box=None,
+                image_box=None, label_placement=None,
+                seam_review=[str(left), str(bottom)],
+                seam_edge=["left", "bottom"],
+                require_seam_edge=["left", "right", "bottom"],
+            ))
+
+    def test_figure11_row_specific_boundaries_remove_adjacent_panel_pollution(self) -> None:
+        source = self.root / "figure11-synthetic-grid.png"
+        image = Image.new("RGB", (160, 80), "white")
+        draw = ImageDraw.Draw(image)
+        colors = {
+            "a": (25, 55, 85), "b": (125, 65, 35), "c": (45, 115, 75),
+            "d": (205, 175, 135), "e": (55, 85, 155), "f": (175, 75, 135),
+        }
+        draw.rectangle((0, 0, 49, 39), fill=colors["a"])
+        draw.rectangle((55, 0, 101, 39), fill=colors["b"])
+        draw.rectangle((104, 0, 159, 39), fill=colors["c"])
+        draw.rectangle((0, 40, 52, 79), fill=colors["d"])
+        draw.rectangle((53, 40, 98, 79), fill=colors["e"])
+        draw.rectangle((101, 40, 159, 79), fill=colors["f"])
+        image.save(source)
+
+        def review(name: str, band: list[int], search: list[int], selected: int) -> Path:
+            report = self.root / f"figure11-{name}.json"
+            postprocess_assets.seam_review_command(argparse.Namespace(
+                input=str(source), report=str(report),
+                overlay=str(self.root / f"figure11-{name}.png"),
+                axis="x", band=band, search=search,
+                selected=selected, tolerance=0,
+            ))
+            return report
+
+        reports = {
+            "c": review("top-c-left", [0, 40], [103, 105], 104),
+            "e": review("bottom-e-left", [40, 80], [51, 55], 53),
+            "f": review("bottom-f-left", [40, 80], [100, 103], 101),
+        }
+        correct_boxes = {
+            "c": [104, 0, 160, 40],
+            "e": [53, 40, 99, 80],
+            "f": [101, 40, 160, 80],
+        }
+        wrong_boxes = {
+            "c": [100, 0, 160, 40],
+            "e": [50, 40, 99, 80],
+            "f": [98, 40, 160, 80],
+        }
+        for label in ("c", "e", "f"):
+            wrong = image.crop(wrong_boxes[label])
+            self.assertNotEqual(wrong.getpixel((0, 10)), colors[label])
+            panel = self.root / f"figure11-panel-{label}.png"
+            postprocess_assets.panel_crop_command(argparse.Namespace(
+                input=str(source), output=str(panel), box=correct_boxes[label],
+                label="", label_box=None, image_box=None, label_placement=None,
+                seam_review=[str(reports[label])], seam_edge=["left"],
+                require_seam_edge=["left"],
+            ))
+            with Image.open(panel) as opened:
+                self.assertEqual(opened.convert("RGB").getpixel((0, 10)), colors[label])
+            sidecar = json.loads(
+                panel.with_suffix(panel.suffix + image_polarity.POSTPROCESS_SUFFIX).read_text()
+            )
+            handled, failures = image_polarity._deterministic_helper_evidence(panel, sidecar)
+            self.assertTrue(handled)
+            self.assertFalse(failures)
+
+    def test_banded_composite_accepts_replayable_panel_crop_chain(self) -> None:
+        source = self.root / "authenticated-composite.png"
+        image = Image.new("RGB", (200, 100), "white")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((5, 5, 95, 95), fill=(30, 80, 125))
+        draw.rectangle((105, 5, 195, 95), fill=(130, 70, 30))
+        image.save(source)
+        panels = []
+        for name, box in (("a", [0, 0, 100, 100]), ("b", [100, 0, 200, 100])):
+            panel = self.root / f"panel-{name}.png"
+            postprocess_assets.panel_crop_command(argparse.Namespace(
+                input=str(source), output=str(panel), box=box,
+                label="", label_box=None, image_box=None, label_placement=None,
+            ))
+            panels.append(panel)
+        final = self.root / "recomposed.png"
+        run = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).with_name("recompose_panels_banded.py")),
+                str(final), "--inputs", *(str(panel) for panel in panels),
+                "--geometry", str(self.root / "geometry.json"), "--no-trim",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr + run.stdout)
+        spec = self.root / "spec.json"
+        spec.write_text(json.dumps({
+            "slides": [{"type": "figure", "image": str(final)}]
+        }))
+        report = {
+            "verified_raster_terminals": [str(source)],
+            "verified_references": [{"path": str(source), "kind": "figure", "page": 1}],
+            "figures": [],
+        }
+
+        result = image_polarity.audit_final_assets(spec, report)
+
+        self.assertTrue(result["ok"], result["failures"])
+
+    def test_panel_crop_records_verified_edge_trim_without_altering_exact_crop(self) -> None:
+        source = self.root / "verified-edge-source.png"
+        image = Image.new("RGB", (120, 90), (20, 40, 60))
+        image.save(source)
+        panel = self.root / "verified-edge-panel.png"
+        postprocess_assets.panel_crop_command(argparse.Namespace(
+            input=str(source), output=str(panel), box=[10, 5, 110, 85],
+            label="", label_box=None, image_box=None, label_placement=None,
+            verified_edge_trim=[0, 5, 0, 0],
+            verified_edge_trim_reason="manual-visual-review",
+        ))
+        sidecar = json.loads(
+            panel.with_suffix(panel.suffix + image_polarity.POSTPROCESS_SUFFIX).read_text()
+        )
+
+        handled, failures = image_polarity._deterministic_helper_evidence(panel, sidecar)
+
+        self.assertTrue(handled)
+        self.assertFalse(failures)
+        self.assertEqual(
+            sidecar["verified_edge_trim_px"],
+            {"top": 0, "bottom": 5, "left": 0, "right": 0},
+        )
+        self.assertEqual(sidecar["output_size_px"], [100, 80])
+        with Image.open(panel) as opened:
+            self.assertEqual(opened.size, (100, 80))
+
+    def test_panel_crop_rejects_out_of_bounds_geometry(self) -> None:
+        source = self.root / "authenticated-figure.png"
+        write_image(source)
+        with self.assertRaises(SystemExit):
+            postprocess_assets.panel_crop_command(argparse.Namespace(
+                input=str(source), output=str(self.root / "panel.png"),
+                box=[0, 0, 97, 96], label="", label_box=None,
+                image_box=None, label_placement=None,
+            ))
 
     def test_composite_requires_authenticated_panel_geometry(self) -> None:
         left = self.root / "left.png"
