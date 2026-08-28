@@ -236,8 +236,10 @@ def validate_map(map_path: Path) -> dict[str, Any]:
             )
             if actual_caption != declared_text:
                 failures.append(f"{prefix} caption evidence does not replay from the PDF.")
+            caption_label = r"(?:figure|fig\.)" if kind == "figure" else "table"
             caption_pattern = re.compile(
-                rf"^{kind}\s*{re.escape(number)}(?:\s*[.:\u2013\u2014-]|\b)", re.IGNORECASE
+                rf"^{caption_label}\s*{re.escape(number)}(?:\s*[.:\u2013\u2014-]|\b)",
+                re.IGNORECASE,
             )
             if caption_pattern.search(actual_caption) is None:
                 failures.append(
