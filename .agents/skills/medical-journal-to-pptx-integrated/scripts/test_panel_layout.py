@@ -674,6 +674,40 @@ class PanelLayoutTests(unittest.TestCase):
         self.assertEqual(sidecar["panel_cleanup"][0]["boundary_adjustments"], [])
         self.assertEqual(sidecar["panel_cleanup"][1]["boundary_adjustments"], [])
 
+    def test_figure10_reviewed_horizontal_seam_cannot_be_shifted_for_false_label_frame(self) -> None:
+        source = Image.new("RGB", (400, 620), (12, 12, 12))
+        draw = ImageDraw.Draw(source)
+        draw.rectangle((29, 312, 366, 597), fill=(92, 92, 92))
+        # A bright rectangular acquisition feature crosses the reviewed seam
+        # near the upper panel's right corner.  The legacy label-frame repair
+        # mistook this for a clipped panel letter and expanded A into D.
+        draw.rectangle((337, 294, 365, 332), outline=(235, 235, 235), width=3)
+        inputs = self.source_panels(source, [
+            (29, 25, 367, 312),
+            (29, 312, 367, 598),
+        ])
+        for path, edge in zip(inputs, ("bottom", "top")):
+            sidecar_path = Path(str(path) + ".postprocess.json")
+            metadata = json.loads(sidecar_path.read_text())
+            metadata["command"] = "panel-crop"
+            metadata["required_seam_edges"] = [edge]
+            metadata["seam_reviews"] = {edge: {"edge": edge}}
+            sidecar_path.write_text(json.dumps(metadata))
+
+        _, sidecar, _ = self.compose_inputs(
+            inputs,
+            "--asset-type", "clinical-image",
+            "--cols", "1",
+            "--no-trim",
+        )
+
+        upper, lower = sidecar["panel_cleanup"]
+        self.assertEqual(upper["boundary_adjustments"], [])
+        self.assertEqual(lower["boundary_adjustments"], [])
+        adjacency = sidecar["source_seam_topology"]["groups"][0]["adjacencies"][0]
+        self.assertEqual(adjacency["first_coordinate_px"], 312)
+        self.assertEqual(adjacency["second_coordinate_px"], 312)
+
     def test_embedded_source_label_preserves_all_image_pixels_and_uses_no_duplicate(self) -> None:
         source = self.directory / "embedded_A.png"
         image = Image.new("RGB", (160, 120), (4, 4, 4))

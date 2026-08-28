@@ -76,7 +76,9 @@ language rules, and final QA.
    banded recomposer independently infers all interior edges from source-space
    topology and fails if any declaration or report is missing. Review both edges
    of a visible gutter separately and reuse evidence only when its source band
-   truly covers the attached edge. See
+   truly covers the attached edge. An authenticated seam is immutable: later
+   label-preservation or cleanup heuristics must never expand a panel across it
+   or move its neighboring panel away from it. See
    [crop design](references/article_level_crop_design.md) for the complete
    multi-seam evidence, replay, label, and bounded-cleanup contracts.
    Preserve verified source topology, relative scale, aspect ratios, gutters,

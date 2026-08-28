@@ -113,7 +113,10 @@ crop cannot bypass this check by omitting required edges: for clinical panels
 cropped from one authenticated raster, the banded compositor infers all nearest
 right/below source-space adjacencies, requires both sides of each adjacency,
 and records a deterministic source-seam topology graph. Final QA regenerates
-the graph and rejects a missing, changed, or stale topology record. A replayable panel
+the graph and rejects a missing, changed, or stale topology record. Every
+required edge with matching seam evidence stays pixel-exact through
+recomposition; the gate rejects a label-preservation adjustment that crosses a
+reviewed seam. A replayable panel
 crop may declare a separately verified 0–12 px
 edge trim with an allowed audit reason; final QA validates its per-side values,
 reason, and verified + heuristic = total arithmetic. A narrow full-edge bright

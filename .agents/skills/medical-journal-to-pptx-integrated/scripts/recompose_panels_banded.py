@@ -718,17 +718,20 @@ def _contains_clinical_color(strip):
     return any(end - start >= 3 for start, end in _bright_runs(columns))
 
 
-def reconcile_panel_boundaries(images, metadata, max_shift_px=24):
+def reconcile_panel_boundaries(images, metadata, max_shift_px=24, protected_edges=None):
     """Recrop trusted neighboring panels when a seam splits an embedded label.
 
     Panels must be exact crops of the same audited source. Adjoining crop boxes
     form independent overlap components: a 2x2 source can adjust only A/C,
     while a full-width lower panel links both upper panels to one shared seam.
+    An edge authenticated by panel seam-review evidence is immutable: a later
+    label-frame heuristic cannot override a visually reviewed clinical seam.
     No pixels are painted, erased, inpainted, or copied from another image.
     """
     if not 0 <= max_shift_px <= 64:
         raise ValueError("max_boundary_shift_px must be between 0 and 64")
     decisions = [[] for _ in images]
+    protected_edges = protected_edges or {}
     if not max_shift_px:
         return images, decisions
 
@@ -788,6 +791,16 @@ def reconcile_panel_boundaries(images, metadata, max_shift_px=24):
 
                 upper_panels = {upper for upper, lower in links if upper in component and lower in component}
                 lower_panels = {lower for upper, lower in links if upper in component and lower in component}
+                component_links = [
+                    (upper, lower) for upper, lower in links
+                    if upper in component and lower in component
+                ]
+                if any(
+                    "bottom" in protected_edges.get(upper, set())
+                    or "top" in protected_edges.get(lower, set())
+                    for upper, lower in component_links
+                ):
+                    continue
                 findings = []
                 for upper in upper_panels:
                     finding = boxed_label_bottom(pixels, boxes[upper], boundary, max_shift_px)
@@ -1504,6 +1517,20 @@ def main():
     if labels and len(labels) != len(a.inputs):
         ap.error(f"label count ({len(labels)}) must equal panel count ({len(a.inputs)})")
     panel_metadata = [source_metadata(path) for path in a.inputs]
+    protected_seam_edges = {}
+    for panel_index, metadata in enumerate(panel_metadata):
+        required = metadata.get("required_seam_edges")
+        reviews = metadata.get("seam_reviews")
+        if not isinstance(required, list) or not isinstance(reviews, dict):
+            continue
+        protected = {
+            edge for edge in required
+            if edge in EDGE_SIDES
+            and isinstance(reviews.get(edge), dict)
+            and reviews[edge].get("edge") == edge
+        }
+        if protected:
+            protected_seam_edges[panel_index] = protected
     source_seam_topology = None
     if a.asset_type == "clinical-image":
         try:
@@ -1522,7 +1549,7 @@ def main():
             )
     try:
         panels, boundary_adjustments = reconcile_panel_boundaries(
-            panels, panel_metadata, a.max_boundary_shift_px
+            panels, panel_metadata, a.max_boundary_shift_px, protected_seam_edges
         )
     except ValueError as error:
         ap.error(str(error))

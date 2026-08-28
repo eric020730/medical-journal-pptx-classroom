@@ -63,6 +63,11 @@ different panel widths after journal layout, PDF placement, or rasterization.
    deterministic `medical-journal-source-seam-topology/v1` graph, and QA
    regenerates and compares that graph. This closes the legacy path where a
    caller omitted `--require-seam-edge` entirely.
+8. Treat every required edge with a matching seam review as locked. The
+   recomposer's embedded-label recovery may reconcile a rough, unreviewed crop,
+   but it must never move a locked edge. A bright acquisition frame or an
+   adjacent panel letter near a reviewed row boundary is not permission to
+   expand the upper panel into the lower panel.
 
 ## Caption Detection Heuristics
 

@@ -106,6 +106,9 @@ invariant when modifying extraction, asset processing, deck building, or QA.
       declarations fail. The composite records a deterministic
       `medical-journal-source-seam-topology/v1` graph, and final QA regenerates
       and compares it so missing or stale topology metadata cannot pass.
+- [x] Every authenticated required seam is locked before embedded-label frame
+      reconciliation, so a false label-frame detection cannot expand an upper
+      clinical panel into its lower neighbor or move either reviewed edge.
 - [x] White, gray, and anti-aliased achromatic edge seams are trimmed by at most
       four pixels per side by default for both standalone raster figures and
       recomposed panels. A uniform dark clinical canvas stops the trim sequence,
