@@ -1,6 +1,6 @@
 # 全域整合版 Skill：安裝、升級與解除安裝
 
-`medical-journal-to-pptx-integrated v4.3.0` 是真正獨立的全域 Codex
+`medical-journal-to-pptx-integrated v4.4.0` 是真正獨立的全域 Codex
 skill。安裝後不必打開 classroom repository；在任何專案或工作資料夾都可以
 使用 `$medical-journal-to-pptx-integrated`。
 
@@ -26,28 +26,28 @@ repository 內的 `$medical-journal-to-pptx-classroom` 也只接受 `full`，
 ## 從 GitHub release 下載
 
 1. 開啟 [GitHub Releases](https://github.com/eric020730/medical-journal-pptx-classroom/releases/latest)。
-2. 下載 `medical-journal-to-pptx-integrated-v4.3.0.zip` 及同名 `.sha256`。
+2. 下載 `medical-journal-to-pptx-integrated-v4.4.0.zip` 及同名 `.sha256`。
 3. 驗證 SHA-256，然後完整解壓縮。不要只複製單一 `SKILL.md`；scripts、
    references、logo 與 requirements 都是 skill 必要部分。
 
 macOS / Linux：
 
 ```bash
-shasum -a 256 -c medical-journal-to-pptx-integrated-v4.3.0.zip.sha256
-unzip medical-journal-to-pptx-integrated-v4.3.0.zip
-cd medical-journal-to-pptx-integrated-v4.3.0
+shasum -a 256 -c medical-journal-to-pptx-integrated-v4.4.0.zip.sha256
+unzip medical-journal-to-pptx-integrated-v4.4.0.zip
+cd medical-journal-to-pptx-integrated-v4.4.0
 bash install-global.sh install
 ```
 
 Windows PowerShell：
 
 ```powershell
-$archive = "medical-journal-to-pptx-integrated-v4.3.0.zip"
+$archive = "medical-journal-to-pptx-integrated-v4.4.0.zip"
 $expected = ((Get-Content "$archive.sha256") -split "\s+")[0]
 $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "SHA-256 mismatch" }
 Expand-Archive $archive -DestinationPath .
-Set-Location .\medical-journal-to-pptx-integrated-v4.3.0
+Set-Location .\medical-journal-to-pptx-integrated-v4.4.0
 .\install-global.ps1 install
 ```
 
@@ -141,3 +141,19 @@ python3 install-global.py uninstall --target /path/to/global/skills
 ```
 
 `--skip-deps` 只適合已自行管理 Python 套件的 CI 或進階環境。
+
+## 檢查先前簡報的驗證紀錄
+
+整合版完整 `qa` 會在 PPTX 旁留下 `.pptx.qa.json` 本機紀錄。之後使用：
+
+```bash
+python3 /path/to/skill/scripts/run.py qa-status deck.pptx --spec deck_spec.json --style standard --json
+```
+
+檔案、規格或技能檢查程式改變後，舊紀錄會顯示 `stale`；沒有紀錄或上次
+QA 未成功完成則為 `unverified`。兩者都需要重新執行完整 `qa`。
+這不是 PowerPoint 內的自動標章，也不是數位簽章或臨床認證。來源 PDF、圖片
+或套件版本改變時仍應重新跑完整 QA。
+
+維護者測試已涵蓋完整套件安裝；一般學生安裝時不需加 `--skip-deps`。
+若從 main 下載，文件版本可能尚未正式發布；Releases 下載以該頁的附檔為準。

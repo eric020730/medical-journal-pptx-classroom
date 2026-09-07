@@ -2,14 +2,14 @@
 
 把一篇醫學期刊 PDF 交給 Codex，產生可編輯的 PowerPoint：**英文投影片、繁體中文講者備註、論文 Figures／Tables，以及自動品質檢查**。
 
-本專案提供兩種互相獨立的入口：classroom repository skill，以及 `v4.3.0` **可全域安裝、可在任何專案啟用的整合版 skill**。整合版固定使用 40–55 張的 full 模式，支援 standard／nice 視覺風格、建檔前後雙階段 QA、PDF 灰階反相檢查與完整影像來源追蹤。
+本專案提供兩種互相獨立的入口：classroom repository skill，以及 `v4.4.0` **可全域安裝、可在任何專案啟用的整合版 skill**。整合版固定使用 40–55 張的 full 模式，支援 standard／nice 視覺風格、建檔前後雙階段 QA、PDF 灰階反相檢查與完整影像來源追蹤。
 
 > 這不是無需 AI 帳號的離線產生器。Python 腳本負責讀取 PDF、處理圖片、組裝與驗證 PowerPoint；理解論文、撰寫英文投影片及繁體中文講稿，仍需要可使用 Codex 的帳號。
 
 ## 推薦：安裝可在任何專案使用的全域整合版
 
 從 [最新 GitHub release](https://github.com/eric020730/medical-journal-pptx-classroom/releases/latest)
-下載 `medical-journal-to-pptx-integrated-v4.3.0.zip` 和 `.sha256`，驗證後完整解壓縮。
+下載 `medical-journal-to-pptx-integrated-v4.4.0.zip` 和 `.sha256`，驗證後完整解壓縮。
 
 macOS / Linux：
 
@@ -40,6 +40,31 @@ PDF 灰階／來源檢查，通過兩階段 QA 後儲存到指定輸出資料夾
 [全域安裝、升級與解除安裝](docs/GLOBAL-INSTALL.md)。
 
 以下 classroom 操作仍保留，適合希望整個教材跟著 repository 移動的教學情境。
+
+## 整合版：簡報修改後的驗證狀態
+
+完整 `qa` 通過後，簡報旁會產生 `<檔名.pptx>.qa.json`，記錄檔案、規格、
+技能與檢查程式版本。使用整合版的 `scripts/run.py qa-status deck.pptx
+--spec deck_spec.json --style standard --json` 可確認紀錄是否仍適用。
+`current` 表示檔案吻合；`stale` 或 `unverified` 表示應重跑完整 QA。
+它是未簽章的本機紀錄，不代表臨床正確性；來源圖片、PDF 或套件改變時，也應重跑完整 QA。
+
+## 維護者：版本與正式發布
+
+整合版的 `VERSION` 是目前版本的唯一來源。修改它後執行
+`python tools/release_version.py --write`，同步目前的說明文件與設定。
+不帶 `--write` 時只檢查；CI 與打包工具會拒絕版本不一致的狀態。
+舊簡報、classroom skill 版本與歷史 release 不會改寫。
+
+正式發布時，推送與 `VERSION` 相同的版本 tag。發布流程會先跑完整 CI，
+包含三個系統的最低支援／最新套件安裝測試，再建立整合版 ZIP、SHA-256 與
+GitHub Release。既有同名 release 不會覆寫。只有推送 main 不會發布新版本；
+main 的版本可能比 Releases 頁面新，下載時請以該 release 實際附檔為準。
+
+本機可執行 `python tools/check_clean_install.py --profile minimum` 或
+`--profile latest` 重現真實安裝、兩種 full 簡報、升級及解除安裝測試。
+測試使用獨立目錄，不會修改已安裝的全域技能；最低版本固定直接依賴的下限，
+其餘間接依賴交由套件解析器選擇相容版本。
 
 ## 先確認你需要什麼
 
@@ -172,7 +197,7 @@ medical-journal-pptx-classroom/
 │   └── assets/                          簡報 Logo 等資源
 ├── .agents/skills/medical-journal-to-pptx-integrated/
 │   ├── SKILL.md                         全域整合版簡潔入口
-│   ├── VERSION                          v4.3.0
+│   ├── VERSION                          v4.4.0
 │   ├── scripts/                         雙視覺 builder、雙階段 QA、polarity
 │   └── references/                      完整流程、兩種風格、QA 來源鏈
 ├── docs/                                詳細安裝、教學與疑難排解

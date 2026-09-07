@@ -6,6 +6,35 @@ full --style standard|nice` afterwards. Both commands combine independent
 teaching-deck, specification, PowerPoint, logo, and PDF-polarity checks.
 Any `[FAIL]` blocks delivery.
 
+## Local QA receipt and later edits
+
+The combined `qa_gate.py all` gate and portable `run.py qa` command write a
+neighboring `<deck.pptx>.qa.json` receipt. A successful receipt contains the
+exact PPTX and spec SHA-256, skill version, validator-code SHA-256, UTC check
+time, mode/style, slide count and warning/failure counts. It omits source text,
+patient data and local paths. Keep it with the private run or deck; it is not a
+public release artifact. A retry first marks the receipt in progress, so failed
+or interrupted QA cannot leave an old passing receipt active.
+
+Before relying on a previous pass, run:
+
+```bash
+python scripts/run.py qa-status deck.pptx --spec deck_spec.json --style standard --json
+```
+
+Exit 0 / `current` means the deck, spec, mode/style and installed validator still
+match that local record. Exit 1 / `stale` means they changed; `unverified` means
+the receipt or input is missing, invalid, or the last QA failed/interrupted.
+Run full `qa` again to refresh it. Status checks are explicit, not a background
+watcher or a badge inside PowerPoint. Moving unchanged files together is safe.
+
+This is an unsigned local integrity record, not a digital signature, proof
+against deliberate tampering, or certification of clinical accuracy. The quick
+status command does not reopen external source PDFs, images, provenance
+sidecars, or repeat visual review. If those inputs or the runtime dependencies
+change, run full QA even if the receipt is current. The raw spec hash is
+conservative: even formatting-only JSON changes require QA again.
+
 The builder embeds a deterministic manifest in the PowerPoint: skill version,
 selected style, exact presentation canvas dimensions, canonical specification
 hash, per-slide content/notes hashes,

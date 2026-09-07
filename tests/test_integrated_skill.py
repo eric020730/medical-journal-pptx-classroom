@@ -67,12 +67,12 @@ class IntegratedSkillStructureTests(unittest.TestCase):
     def test_skill_identity_version_and_concise_entrypoint(self) -> None:
         content = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn(f"name: {SKILL_NAME}", content)
-        self.assertLess(len(content.splitlines()), 140)
+        self.assertLess(len(content.splitlines()), 150)
         self.assertIn("40–55 slides", content)
         self.assertIn("`full` is the only supported content mode", content)
         self.assertIn("--mode full", content)
         version = (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
-        self.assertEqual(version, "v4.3.4")
+        self.assertRegex(version, r"^v\d+\.\d+\.\d+$")
         project = json.loads(
             (PROJECT_ROOT / ".classroom-project.json").read_text(encoding="utf-8")
         )
@@ -225,6 +225,24 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
             presentation = Presentation(str(output))
             self.assertEqual(len(presentation.slides), expected_slides)
             self.assertTrue(all(slide.notes_slide.notes_text_frame.text for slide in presentation.slides))
+            spec_path = Path(payload["work_dir"]) / "deck_spec.json"
+            receipt = invoke(SKILL_RUNNER, "qa-status", output, "--spec", spec_path,
+                             "--style", style, "--json")
+            self.assertEqual(receipt.returncode, 0, msg=receipt.stderr)
+            self.assertEqual(json.loads(receipt.stdout)["status"], "current")
+            # A real PowerPoint edit must invalidate the earlier receipt without
+            # rerunning the expensive source-image gates just to detect a change.
+            presentation.slides[0].notes_slide.notes_text_frame.text += " 修改備註"
+            presentation.save(str(output))
+            stale = invoke(SKILL_RUNNER, "qa-status", output, "--spec", spec_path,
+                           "--style", style, "--json")
+            self.assertEqual(stale.returncode, 1, msg=stale.stderr)
+            self.assertEqual(json.loads(stale.stdout)["status"], "stale")
+            failed = invoke(SKILL_RUNNER, "qa", output, "--spec", spec_path,
+                            "--style", style, "--json")
+            self.assertEqual(failed.returncode, 1, msg=failed.stderr)
+            record = json.loads(Path(str(output) + ".qa.json").read_text(encoding="utf-8"))
+            self.assertEqual(record["result"], "failed")
 
     def test_standard_full_generates_verified_bilingual_deck(self) -> None:
         self.check_combination("full", "standard", 40)

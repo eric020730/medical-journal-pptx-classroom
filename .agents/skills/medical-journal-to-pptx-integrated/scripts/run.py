@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError:
         # The doctor command itself uses only the standard library and should
         # remain available specifically when dependencies are missing.
-        if arguments[:1] != ["doctor"]:
+        if arguments[:1] not in (["doctor"], ["qa-status"]):
             raise
         executable = Path(sys.executable).absolute()
     command = [str(executable), str(SKILL_ROOT / "scripts" / "workflow.py"), *arguments]

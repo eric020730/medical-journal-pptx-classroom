@@ -88,6 +88,13 @@ def check_presentation(
 
 
 def check_all(spec: Path, pptx: Path, *, mode: str, style: str) -> dict[str, Any]:
+    from qa_attestation import record_qa
+
+    return record_qa(pptx, spec, mode=mode, style=style,
+                     validate=lambda: _check_all(spec, pptx, mode=mode, style=style))
+
+
+def _check_all(spec: Path, pptx: Path, *, mode: str, style: str) -> dict[str, Any]:
     before = check_specification(spec, mode=mode, style=style)
     after = check_presentation(pptx, spec=spec, mode=mode, style=style)
     failures = list(dict.fromkeys([*before["failures"], *after["failures"]]))

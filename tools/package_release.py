@@ -12,6 +12,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from release_version import synchronize
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG = json.loads((PROJECT_ROOT / ".classroom-project.json").read_text(encoding="utf-8"))
@@ -62,11 +64,13 @@ PUBLIC_DOCUMENTS = {
 }
 PUBLIC_TOOLS = {
     "classroom.py", "image_polarity.py", "make_demo_paper.py", "package_release.py", "qa_check.py",
+    "release_version.py", "check_clean_install.py",
 }
-PUBLIC_TESTS = {"test_advanced_qa.py", "test_classroom.py", "test_integrated_skill.py"}
+PUBLIC_TESTS = {"test_advanced_qa.py", "test_classroom.py", "test_integrated_skill.py", "test_release_reliability.py"}
 PUBLIC_GITHUB_FILES = {
     ".github/ISSUE_TEMPLATE/environment-report.yml", ".github/dependabot.yml",
     ".github/pull_request_template.md", ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
 }
 PUBLIC_SKILL_NAMES = {
     "medical-journal-to-pptx-classroom", CONFIG["integrated_skill_name"],
@@ -180,6 +184,7 @@ def _zip_info(archive_name: str, source: Path) -> zipfile.ZipInfo:
 
 
 def create_release(destination: Path | None = None) -> dict[str, Any]:
+    assert_versions_current()
     version = CONFIG["classroom_version"]
     archive_root = CONFIG["project_name"]
     if destination is None:
@@ -263,6 +268,7 @@ def integrated_skill_files() -> list[tuple[Path, str]]:
 
 def create_skill_release(destination: Path | None = None) -> dict[str, Any]:
     """Build a deterministic skill-only ZIP without classroom PDFs or project data."""
+    assert_versions_current()
     skill_root = (
         PROJECT_ROOT / ".agents" / "skills" / CONFIG["integrated_skill_name"]
     )
@@ -321,6 +327,13 @@ def create_skill_release(destination: Path | None = None) -> dict[str, Any]:
         "files": len(files) + 1,
         "size_bytes": destination.stat().st_size,
     }
+
+
+def assert_versions_current() -> None:
+    changed = synchronize(PROJECT_ROOT)
+    if changed:
+        raise RuntimeError("Release metadata is stale: " + ", ".join(changed)
+                           + ". Run python tools/release_version.py --write.")
 
 
 def main() -> int:

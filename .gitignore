@@ -33,4 +33,5 @@ Thumbs.db
 # Logs and local reports.
 *.log
 diagnostics.json
+*.pptx.qa.json
 /RELEASE-MANIFEST.txt

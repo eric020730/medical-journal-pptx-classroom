@@ -130,6 +130,10 @@ language rules, and final QA.
    render <output.pptx>` when optional LibreOffice is available. Rendering does
    not overwrite an existing PDF unless explicitly requested. Report only
    verified final artifacts.
+   Successful final QA writes `<output.pptx>.qa.json`. Before reusing a prior
+   pass, run `scripts/run.py qa-status <output.pptx> --spec <spec.json> --style
+   <style>`; a stale/missing receipt requires full QA again. This unsigned local
+   receipt detects deck/spec/validator changes, not clinical accuracy or tampering.
 
 For QA failure meanings and source-chain requirements, read
 [quality gates and image provenance](references/quality_gates.md). For detailed

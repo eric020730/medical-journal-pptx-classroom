@@ -478,10 +478,13 @@ def parser() -> argparse.ArgumentParser:
     completed = commands.add_parser("qa", help="Run both mandatory finished-deck quality gates")
     completed.add_argument("pptx", type=Path)
     completed.add_argument("--spec", type=Path, required=True)
+    receipt = commands.add_parser("qa-status", help="Check whether the last local QA receipt is still current")
+    receipt.add_argument("pptx", type=Path)
+    receipt.add_argument("--spec", type=Path, required=True)
     builder = commands.add_parser("build", help="Run prebuild QA and build the selected style")
     builder.add_argument("spec", type=Path)
     builder.add_argument("--out", type=Path, required=True)
-    for command in (before, completed, builder):
+    for command in (before, completed, builder, receipt):
         command.add_argument("--mode", choices=tuple(MODES), default="full")
         command.add_argument("--style", choices=STYLES, default="standard")
         command.add_argument("--json", action="store_true")
@@ -514,6 +517,12 @@ def emit(payload: dict[str, Any], *, as_json: bool) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "qa-status":
+        from qa_attestation import status
+
+        report = status(args.pptx.resolve(), args.spec.resolve(), mode=args.mode, style=args.style)
+        emit(report, as_json=args.json)
+        return 0 if report["ok"] else 1
     if args.command == "doctor":
         payload = doctor(strict=args.strict)
         emit(payload, as_json=args.json)
