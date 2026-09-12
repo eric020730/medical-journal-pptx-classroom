@@ -42,6 +42,10 @@ jobs:
       - name: Regression, packaging, and repeat install (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        # Tests invoke helpers directly; match journal.cmd / subprocess_environment.
+        # Keep the earlier fresh-install and launcher steps on the native defaults.
+        env:
+          PYTHONUTF8: '1'
         run: |
           $py = './.venv/Scripts/python.exe'
           & $py -c "import pathlib,sys; assert pathlib.Path(sys.base_prefix).is_relative_to(pathlib.Path.cwd()/'.bootstrap')"
