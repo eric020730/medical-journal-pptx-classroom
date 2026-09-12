@@ -152,7 +152,7 @@ def main():
                "labels": labels, "native_labels": True,
                "source_inputs": [os.path.abspath(path) for path in a.inputs],
                "gap_above_in": a.gap_above_in, "gap_below_in": a.gap_below_in,
-               "label_pt": a.label_pt},
+               "label_pt": a.label_pt, "geometry": geom[name]},
               open(a.output + ".postprocess.json", "w"))
     print(f"{name}: {W}x{H}px band={band}px fit={fit:.5f} "
           f"-> geometry[{name}] x{len(rects)} written to {a.geometry}")

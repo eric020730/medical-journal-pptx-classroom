@@ -71,6 +71,11 @@ def main():
         name = img.split("/")[-1].rsplit(".", 1)[0]
         if name not in geom:
             continue
+        if sp.get('panel_labels'):
+            raise SystemExit('Do not combine builder panel_labels with native labels')
+        if any(sh.has_text_frame and sh.text.strip() in
+               {p['label'] for p in geom[name]} for sh in slide.shapes):
+            raise SystemExit('Panel labels already exist; start from the unlabeled deck')
         pic = biggest_picture(slide)
         if pic is None:
             continue

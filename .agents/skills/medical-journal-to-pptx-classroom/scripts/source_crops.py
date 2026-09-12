@@ -21,7 +21,7 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def region(page, box, expected=()):
+def region(page, box, expected=(), *, image_only=False):
     """Reject out-of-page bounds and partial words/images before rasterization."""
     if len(box) != 4 or not all(math.isfinite(v) for v in box):
         raise ValueError("bbox must contain four finite PDF-point coordinates")
@@ -35,6 +35,14 @@ def region(page, box, expected=()):
         overlap = wr & rect
         if overlap.is_empty:
             continue
+        if image_only:
+            # Font line boxes can extend into an image despite the glyph being
+            # outside it. Accept only when every traced character of this word
+            # is outside; never waive a character actually touching the crop.
+            chars = [fitz.Rect(c[3]) for s in page.get_texttrace()
+                     for c in s['chars'] if wr.contains(fitz.Point(c[2]))]
+            if chars and all((r & rect).is_empty for r in chars):
+                continue
         if overlap.get_area() < wr.get_area() - 0.01:
             raise ValueError(f"Crop cuts text {word[4]!r}: {box}")
         selected.append(word[4])
@@ -77,10 +85,17 @@ def image_region(page, reviewed):
                if reviewed.contains(fitz.Rect(info['bbox']))]
     if len(matches) != 1:
         raise ValueError('Image-only export needs exactly one complete source image per panel')
-    bounds = matches[0] + (-0.3, -0.3, 0.3, 0.3)
+    bounds = fitz.Rect(matches[0])
+    # Include only real rectangular frames that coincide with this image.
+    # Do not invent a fixed white border around every PDF image object.
+    for drawing in page.get_drawings():
+        for item in drawing['items']:
+            if item[0] == 're' and all(abs(a-b) < 1 for a,b in zip(item[1], matches[0])):
+                half = drawing.get('width', 0) / 2
+                bounds |= fitz.Rect(item[1]) + (-half, -half, half, half)
     if not reviewed.contains(bounds):
         raise ValueError('Reviewed panel must include the complete image border')
-    rect, text = region(page, list(bounds))
+    rect, text = region(page, list(bounds), image_only=True)
     return rect
 
 

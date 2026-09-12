@@ -137,7 +137,7 @@ class SourceCropTests(unittest.TestCase):
         out = self.root/'out'
         crops.generate(plan,out)
         with fitz.open(pdf) as doc:
-            for label, expected in [('A',(19.7,19.7,120.3,120.3)),('B',(149.7,19.7,200.3,170.3))]:
+            for label, expected in [('A',(20,20,120,120)),('B',(150,20,200,170))]:
                 path = out/f'Figure_1_{label}_image.png'
                 with Image.open(path) as image:
                     reference = crops.render(doc[0],fitz.Rect(expected),72)
@@ -167,6 +167,17 @@ class SourceCropTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'exactly one'):
                 crops.image_region(doc[0],doc[0].rect)
 
+    def test_font_box_overlap_does_not_cut_image(self):
+        with fitz.open() as doc:
+            page = doc.new_page(width=200,height=200)
+            stream=io.BytesIO(); Image.new('RGB',(100,100),'red').save(stream,format='PNG')
+            page.insert_image(fitz.Rect(20,20,120,120),stream=stream.getvalue())
+            page.insert_text((110,131),'A',fontsize=11)
+            self.assertEqual(list(crops.image_region(page,[10,10,140,150])),[20,20,120,120])
+            page.insert_text((70,115),'B',fontsize=11)
+            # A real partial glyph remains a failure.
+            with self.assertRaises(ValueError):
+                crops.region(page,[20,20,75,120],image_only=True)
     def test_preview_includes_pages_after_six(self):
         pdf = self.root/'nine.pdf'
         with fitz.open() as doc:

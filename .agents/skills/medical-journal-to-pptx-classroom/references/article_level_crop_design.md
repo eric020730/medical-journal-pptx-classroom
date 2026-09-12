@@ -85,7 +85,7 @@ The local plan has `pdf`, `source_sha256`, `dpi` (default 300),
   For photographic panels, set `export_image_panels: true` to additionally
   export `<Figure_ID>_<label>_image.png`. Each reviewed panel must contain
   exactly one complete image object. The tool uses that object's full bounds
-  plus 0.3 PDF points for its printed border, rechecks clipping, and records
+  plus any coincident rectangular frame's actual stroke width, rechecks clipping, and records
   the actual output bounds. It never subtracts a fixed bottom-pixel strip.
 
 The command rejects partial text/image boundaries, missing anchors, source-hash
@@ -134,6 +134,16 @@ For the standard classroom photographic Figure design:
 4. Run final QA on the labeled deck and render that exact file. Verify original
    label-to-image mapping, visible fixed-size labels, gutters, equal-height
    alignment and unchanged table pages, in addition to crop completeness.
+
+Set `meta.panel_crop_plan` in the deck spec to the reviewed source plan path.
+Keep `export_image_panels: true` in that plan for photographic figures. Final
+QA uses this inventory and composite sidecar geometry to require exactly one
+native 18pt #8FA8C8 label per expected panel at the reserved lower-right position,
+even when builder `panel_labels` is absent. Never fall back to white review
+crops with embedded black letters when image-only export fails. Investigate
+the source boundary and retain a visible unresolved failure until repaired.
+Font line-box overlaps may be excluded only when traced character bounds are
+entirely outside the image crop; table crop validation remains unchanged.
 
 For every new paper, inspect the full source pages to establish fresh bounds.
 At minimum, Table review checks title, all columns, first and last rows, complete
