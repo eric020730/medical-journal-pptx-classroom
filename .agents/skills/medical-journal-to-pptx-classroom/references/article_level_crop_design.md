@@ -116,10 +116,19 @@ For the standard classroom photographic Figure design:
 2. Compose those panels using the existing banded tool, in verified label order:
 
    ```text
-   journal run recompose_panels_banded FINAL.png --inputs A_image.png B_image.png --cols 2 --labels A,B --geometry geometry.json --no-trim --bg "#061428" --label-pt 18
+   journal run recompose_panels_banded FINAL.png --inputs A_image.png B_image.png --cols 2 --labels A,B --geometry geometry.json --medical-image --bg "#061428" --label-pt 18
    ```
 
-   `--no-trim` preserves the validated image extent. The compositor scales
+   `--medical-image` restores peripheral near-white edge trimming for diagnostic
+   image panels after source validation. Retain the full source crop; compare
+   every cleaned edge for anatomy, annotations and scale bars. The sidecar records
+   original and trimmed sizes. Tables, plots and diagrams must not use this flag.
+   As in the earlier radiology design, a 3px background-colored rim masks residual
+   light film/frame pixels after trimming. Review every edge; use `--medical-frame 0`
+   when anatomy or annotations touch it and resolve remaining whitespace with a
+   reviewed crop instead. This is a border overlay, not rescaling of the image.
+   `--no-trim` is for assets that require their full bounds, not the default for
+   medical image panels. The compositor scales
    proportionally, aligns heights within each row, and reserves dark label
    bands. Do not add white padding to its input images. Preserve custom slide
    colors and spacing when the user supplies another design.

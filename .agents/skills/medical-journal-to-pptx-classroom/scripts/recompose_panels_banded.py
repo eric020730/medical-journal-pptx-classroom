@@ -47,7 +47,7 @@ Notes
 * Pair this with add_panel_labels.py AFTER you build the .pptx.
 """
 import argparse, json, os
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 def trim(img, thr=238, frac=0.72, maxcut=0.25):
@@ -112,14 +112,31 @@ def main():
     ap.add_argument("--bg", default="#061428")
     ap.add_argument("--gap", type=int, default=16)
     ap.add_argument("--no-trim", action="store_true")
+    ap.add_argument("--medical-image", action="store_true",
+                    help="Remove peripheral near-white rows/columns from medical image panels before composition")
+    ap.add_argument("--medical-frame", type=int, default=3,
+                    help="Medical-image-only background rim in pixels; use 0 when essential content touches the edge")
     a = ap.parse_args()
 
     bg = hexrgb(a.bg)
     labels = [s for s in a.labels.split(",") if s] if a.labels else []
     cols = a.cols or len(a.inputs)
     panels = [Image.open(p).convert("RGB") for p in a.inputs]
-    if not a.no_trim:
+    original_sizes = [p.size for p in panels]
+    if a.medical_image:
+        if a.no_trim:
+            ap.error('--medical-image cannot be combined with --no-trim')
         panels = [trim(p) for p in panels]
+    elif not a.no_trim:
+        panels = [trim(p) for p in panels]
+    trimmed_sizes = [p.size for p in panels]
+    if a.medical_image:
+        if not 0 <= a.medical_frame <= 3:
+            ap.error('--medical-frame must be 0..3')
+        if a.medical_frame:
+            for panel in panels:
+                ImageDraw.Draw(panel).rectangle((0, 0, panel.width-1, panel.height-1),
+                                               outline=bg, width=a.medical_frame)
 
     glyph_h = a.label_pt / 72.0 * a.glyph_ratio          # on-screen label height (in)
     band_in = a.gap_above_in + glyph_h + a.gap_below_in   # on-screen band per row
@@ -152,7 +169,11 @@ def main():
                "labels": labels, "native_labels": True,
                "source_inputs": [os.path.abspath(path) for path in a.inputs],
                "gap_above_in": a.gap_above_in, "gap_below_in": a.gap_below_in,
-               "label_pt": a.label_pt, "geometry": geom[name]},
+               "label_pt": a.label_pt, "geometry": geom[name],
+               "medical_image": a.medical_image,
+               "medical_frame_px": a.medical_frame if a.medical_image else 0,
+               "edge_trim": {"applied": not a.no_trim, "original_sizes": original_sizes,
+                             "trimmed_sizes": trimmed_sizes}},
               open(a.output + ".postprocess.json", "w"))
     print(f"{name}: {W}x{H}px band={band}px fit={fit:.5f} "
           f"-> geometry[{name}] x{len(rects)} written to {a.geometry}")
