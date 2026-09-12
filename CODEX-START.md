@@ -1,12 +1,12 @@
 # Codex 自動準備 → 放入論文 → 產出簡報
 
-這是 **2026-09-14 課堂的新預設入口**。學生不用學習終端機、Python、Git、Homebrew 或手動匯入 skill。舊版 `START-HERE.md` / HTML 指南保留給教師排錯，不再要求學生逐步照做。
+這是本專案唯一的安裝與製作流程。學生不用學習終端機、Python、Git、Homebrew 或手動匯入 skill。所有操作由取得授權的本機 Codex 執行。
 
 ## 學生只做三件事
 
 1. 安裝並登入支援本機執行的 Codex 客戶端，開啟一個可寫入的空白本機資料夾，例如「論文簡報」。選 Local；Windows 用原生 Windows，不臨時切 WSL。
-2. 貼上老師提供的**本教學版本網址**，加一句：「請依 CODEX-START.md 完成本機環境與 skill 準備，完成後請我提供論文。」只在必要時批准下載或執行，不提供帳密、API key 或全面存取權。
-3. Codex 確認準備完成後，附加自己的 PDF 或提供它可讀取的檔案路徑，說：「請用預設完整模式產出簡報。」沒有可讀取的 PDF 時，Codex 會請你把檔案放到它指出的資料夾，不會假裝已收到。
+2. 貼上**本專案 GitHub 首頁連結**。若尚未表明安裝意圖，Codex 先用一句話確認；也可加一句：「請依 CODEX-START.md 完成本機環境與 skill 準備，完成後請我提供論文。」只在必要時批准下載或執行，不提供帳密、API key 或全面存取權。
+3. Codex 確認準備完成後，附加自己的 PDF 或提供它可讀取的檔案路徑；收到檔案後直接接續製作，不必再輸入啟動指令。沒有可讀取的 PDF 時，Codex 會請你把檔案放到它指出的資料夾，不會假裝已收到。
 
 預設：40–55 張、英文投影片、繁體中文逐頁講稿、原文 Figures / Tables、原有圖片與雙階段 QA，輸出 `.pptx` 到 `outputs`。PPTX 生成不要求 Microsoft PowerPoint。缺少 LibreOffice/Poppler 時先產出 PPTX，不宣稱已完成 PDF 匯出或所有視覺 QA。
 
@@ -18,8 +18,9 @@
 
 先遵守當前工作資料夾的上層規則。必須有可寫入的本機 workspace 與 shell；只有一般聊天、只有 GitHub connector 讀檔、或目前在遠端 Cloud 環境，都不等於已取得學生電腦的執行權限。沒有本機 workspace 時，只要求學生完成這個必要步驟，不列出長串安裝指令。
 
-本次下載及執行已由使用者的安裝要求授權，但仍必須遵守 Codex/作業系統的批准程序與機構政策。取得本教學版本的完整原始碼，不要下載 `Releases/latest`，不要拿整合版單一 SKILL.md 代替專案。
+若使用者只有貼網址，先讀本文件並用一句話確認：「要在目前本機資料夾安裝這個論文轉簡報工具嗎？準備好後我會請你提供 PDF。」已有明確安裝／使用要求時不重複詢問。授權後實際執行，仍遵守 Codex／作業系統批准與機構政策。取得完整原始碼，不要下載歷史 Releases 或只複製 SKILL.md。
 
+- 若使用者給一般專案首頁，解析 `main` 的完整 commit SHA，固定本次下載並回報；不要求學生知道分支或版本號。
 - 若使用者給 `/tree/<40位commit>` 或 `/blob/<commit>/CODEX-START.md`，使用同一個 commit。
 - 若給 branch，先解析該分支當前完整 commit SHA 並固定本次下載，回報採用的 SHA；不要中途追蹤更新。
 - 可用 Git 或 GitHub 的 `https://codeload.github.com/eric020730/medical-journal-pptx-classroom/zip/<commit>` 下載。**不要求學生先裝 Git**：Mac 可用 curl/unzip；Windows 可用 Invoke-WebRequest/Expand-Archive。先在本 workspace 的暫存子資料夾解壓，再搬入所需位置，保留 `.agents` 等隱藏檔案。
@@ -76,7 +77,7 @@ Windows 原生 PowerShell：
 
 ### E. 選用 PDF 匯出（不擋第一份 PPTX）
 
-使用者明確要求 PDF 或完整視覺匯出時，再依原平台文件安裝 LibreOffice / Poppler；需要系統層改動時說明並取得必要批准。不把 PPTX-only 結果宣稱為完整 PDF/視覺 QA。
+使用者明確要求 PDF 或完整視覺匯出時，由 Codex 依 [問題處理](docs/TROUBLESHOOTING.md) 的選用工具規則準備 LibreOffice／Poppler；需要系統層改動時說明並取得必要批准。不把 PPTX-only 結果宣稱為完整 PDF/視覺 QA。
 
 ## 官方依據與版本邊界
 

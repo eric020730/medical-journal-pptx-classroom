@@ -76,9 +76,9 @@ class ReadinessTests(unittest.TestCase):
 
 class DistributionTests(unittest.TestCase):
     def test_both_installers_are_in_kit(self):
-        import package_teaching_kit
+        from package_release import should_package
         for p in ['CODEX-START.md','setup-codex.sh','setup-codex.ps1','tools/codex_setup.py']:
-            self.assertIn(p, package_teaching_kit.ADDITIONS)
+            self.assertTrue(should_package(Path(p)))
 
     def test_no_system_install_or_policy_changes(self):
         for name in ('setup-codex.sh','setup-codex.ps1'):

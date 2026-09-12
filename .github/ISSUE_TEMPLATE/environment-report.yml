@@ -24,8 +24,8 @@ body:
     attributes:
       label: Step that failed
       options:
-        - Installing Homebrew or WinGet
-        - Installing Python
+        - Resolving the GitHub URL / Local workspace
+        - Downloading managed Python
         - Installing LibreOffice or Poppler
         - Installing Python packages
         - Running journal doctor

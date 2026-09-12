@@ -71,5 +71,6 @@ else
   fi
   "$UV" --no-config pip install --python "$PY" --only-binary :all: --requirement "$ROOT/requirements.txt"
 fi
+chmod +x "$ROOT/journal"
 # No paper is processed during setup. The agent reads the skill after this passes.
 "$PY" "$ROOT/tools/codex_setup.py" --check

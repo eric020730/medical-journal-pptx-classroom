@@ -56,7 +56,7 @@ def collect_report() -> dict:
     return {
         "schema_version": 1,
         "checked_at_utc": datetime.now(timezone.utc).isoformat(),
-        "kit_version": "2026.09.14-r1",
+        "project_version": (ROOT / "VERSION").read_text(encoding="utf-8").strip(),
         "local_status": local,
         "doctor_passed": doctor_ok,
         "smoke_test": "passed" if smoke_ok else ("failed" if doctor_ok else "not_run"),
@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Smoke test: {report['smoke_test']}")
     print("Codex: CODEX_UNVERIFIED (manual read-skill + local doctor task required)")
     print("PDF export was not tested. Tool presence is not proof of successful rendering.")
-    print("Read docs/CLASSROOM-STUDENT-GUIDE.html for the next step.")
+    print("Read CODEX-START.md for the next step.")
     print("Default report: .skill-work/classroom-preflight.json (no raw paths or logs)")
     if report["local_status"] == "LOCAL_BLOCKED":
         print("Use the platform setup script or ask the instructor. Do not bypass device policy.")
