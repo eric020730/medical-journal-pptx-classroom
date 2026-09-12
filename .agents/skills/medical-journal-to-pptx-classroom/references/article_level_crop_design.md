@@ -43,3 +43,40 @@ Group on same page when:
 
 If confidence is low, do not silently choose. Use a manual full-page-render crop
 and record the decision in `crop_overrides.json`.
+
+## Source-coordinate crop tool
+
+Use `journal run source_crops plan.json --out NEW_DIRECTORY` for reviewed table
+and multi-panel crops. Coordinates are `[x0,y0,x1,y1]` in PDF points, with
+one-based page numbers. Read the source page before assigning them. The tool
+renders the PDF (including vector flowcharts), preserves original panel letters,
+and pads rather than trimming or stretching medical images.
+
+The local plan has `pdf`, `source_sha256`, `dpi` (default 300),
+`expected_assets` (all article Figure/Table IDs), and `assets`:
+
+- Table: `id`, `type: "table"`, `page`, `bbox`, `expected_text` with source
+  title, column-heading, final-row and footnote anchors. For tall tables add
+  `header_bottom` and ordered `splits` (PDF y coordinates). The tool repeats
+  only the header and partitions the entire body without gaps. Choose splits
+  between complete row groups, not within groups. Footnotes remain in the final
+  part. All parts have the same horizontal bounds; never crop the right column
+  to equalize widths.
+- Figure: `id`, `type: "figure"`, `expected_labels` in original reading order,
+  and `panels` with `label`, `page`, `bbox`, optional `expected_text` anchors.
+  Each crop must include the original printed panel letter. Match the source
+  image and caption before recording the letter; a matching letter alone does
+  not prove the medical panel is correct. `columns` defaults to 2.
+
+The command rejects partial text/image boundaries, missing anchors, source-hash
+changes and inventory mismatches before writing. It saves per-panel images,
+composites, a gallery, a contact sheet and provenance with output hashes.
+Existing output directories are rejected to preserve earlier reviewed versions.
+
+Limitations: PDF text bounds are conservative and may include invisible text;
+the tool cannot establish table identity or semantic completeness from a few
+anchors. Scanned text, vector strokes and incorrect-but-self-consistent plans
+still require visual review. Inspect all panels, headers, rows and footnotes
+against the complete source page. `STRUCTURAL_PASS_VISUAL_REVIEW_REQUIRED`
+must not be reported as a final visual pass. Keep article-specific plans and
+images in `.skill-work/`, never in git or the released skill.

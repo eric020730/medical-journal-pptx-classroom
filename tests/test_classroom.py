@@ -109,6 +109,7 @@ class ClassroomProjectTests(unittest.TestCase):
                     ".venv",
                     ".bootstrap",
                     ".skill-work",
+                    "outputs",  # Private generated PPTX files are not packaged text.
                     ".ruff_cache",
                     ".pytest_cache",
                     "__pycache__",

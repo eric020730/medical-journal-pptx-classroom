@@ -39,6 +39,7 @@ PACKAGE_IMPORTS = {
 }
 
 SCRIPT_ALIASES = {
+    "source_crops": "source_crops.py",
     "extract_from_pdf": "extract_from_pdf.py",
     "postprocess_assets": "postprocess_assets.py",
     "build_deck": "build_deck.py",
@@ -447,7 +448,7 @@ def preview_contact_sheet(pdf: Path, destination: Path) -> Path:
 
     destination.mkdir(parents=True, exist_ok=True)
     with fitz.open(pdf) as document:
-        page_count = min(6, len(document))
+        page_count = len(document)
     if page_count == 0:
         raise ValueError(f"PDF contains no pages: {pdf}")
 
