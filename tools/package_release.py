@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from release_version import synchronize
+from release_version import metadata, synchronize
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +20,7 @@ CONFIG = json.loads((PROJECT_ROOT / ".classroom-project.json").read_text(encodin
 EXCLUDED_DIRECTORIES = {
     ".git",
     ".venv",
+    ".bootstrap",
     ".skill-work",
     ".ruff_cache",
     ".pytest_cache",
@@ -53,28 +54,23 @@ PERSONAL_PATH_RE = re.compile(
 )
 PUBLIC_ROOT_FILES = {
     ".classroom-project.json", ".gitattributes", ".gitignore", "AGENTS.md",
-    "NOTICE.md", "README.md", "journal", "journal.cmd", "requirements.txt",
-    "setup-macos.command", "setup-windows.cmd", "setup-windows.ps1",
-    "install-global.py", "install-global.sh", "install-global.ps1", "install-global.cmd",
+    "NOTICE.md", "README.md", "CODEX-START.md", "VERSION", "journal", "journal.cmd",
+    "requirements.txt", "setup-codex.sh", "setup-codex.ps1",
 }
-PUBLIC_DOCUMENTS = {
-    "FREE-PLAN.md", "GLOBAL-INSTALL.md", "INSTRUCTOR-GUIDE.md", "PRIVACY.md",
-    "PROMPTS.md", "PUBLISH-TO-GITHUB.md", "QUICKSTART-MAC.md",
-    "QUICKSTART-WINDOWS.md", "TROUBLESHOOTING.md",
-}
+PUBLIC_DOCUMENTS = {"PRIVACY.md", "TROUBLESHOOTING.md"}
 PUBLIC_TOOLS = {
-    "classroom.py", "image_polarity.py", "make_demo_paper.py", "package_release.py", "qa_check.py",
-    "release_version.py", "check_clean_install.py",
+    "classroom.py", "image_polarity.py", "make_demo_paper.py", "package_release.py",
+    "qa_check.py", "release_version.py", "classroom_preflight.py", "codex_setup.py",
 }
-PUBLIC_TESTS = {"test_advanced_qa.py", "test_classroom.py", "test_integrated_skill.py", "test_release_reliability.py"}
+PUBLIC_TESTS = {
+    "test_advanced_qa.py", "test_classroom.py", "test_classroom_teaching.py",
+    "test_codex_setup.py", "test_single_workflow.py",
+}
 PUBLIC_GITHUB_FILES = {
     ".github/ISSUE_TEMPLATE/environment-report.yml", ".github/dependabot.yml",
     ".github/pull_request_template.md", ".github/workflows/ci.yml",
-    ".github/workflows/release.yml",
 }
-PUBLIC_SKILL_NAMES = {
-    "medical-journal-to-pptx-classroom", CONFIG["integrated_skill_name"],
-}
+PUBLIC_SKILL_NAMES = {"medical-journal-to-pptx-classroom"}
 
 
 def is_public_skill_file(relative: Path) -> bool:
@@ -145,16 +141,13 @@ def release_files() -> list[Path]:
 
 def validate_release_files(files: list[Path]) -> None:
     required = {
-        Path("README.md"),
-        Path("setup-macos.command"),
-        Path("setup-windows.cmd"),
-        Path("setup-windows.ps1"),
-        Path(".agents/skills/medical-journal-to-pptx-classroom/SKILL.md"),
-        Path(".agents/skills/medical-journal-to-pptx-integrated/SKILL.md"),
-        Path("install-global.py"),
-        Path("install-global.sh"),
-        Path("install-global.ps1"),
-        Path("sample-papers/classroom-demo-paper.pdf"),
+        Path(name) for name in (
+            "README.md", "AGENTS.md", "CODEX-START.md", "VERSION",
+            "setup-codex.sh", "setup-codex.ps1", "tools/codex_setup.py",
+            "tools/classroom_preflight.py", "requirements.txt",
+            ".agents/skills/medical-journal-to-pptx-classroom/SKILL.md",
+            "sample-papers/classroom-demo-paper.pdf",
+        )
     }
     missing = sorted(required.difference(files), key=lambda value: value.as_posix())
     if missing:
@@ -177,7 +170,7 @@ def _zip_info(archive_name: str, source: Path) -> zipfile.ZipInfo:
     info.compress_type = zipfile.ZIP_DEFLATED
     info.create_system = 3
     mode = stat.S_IMODE(source.stat().st_mode)
-    if source.name in {"setup-macos.command", "journal"} or source.suffix == ".sh":
+    if source.name in {"journal"} or source.suffix == ".sh":
         mode |= 0o111
     info.external_attr = (stat.S_IFREG | mode) << 16
     return info
@@ -185,7 +178,7 @@ def _zip_info(archive_name: str, source: Path) -> zipfile.ZipInfo:
 
 def create_release(destination: Path | None = None) -> dict[str, Any]:
     assert_versions_current()
-    version = CONFIG["classroom_version"]
+    version = metadata(PROJECT_ROOT)["version"]
     archive_root = CONFIG["project_name"]
     if destination is None:
         destination = (
@@ -241,94 +234,6 @@ def create_release(destination: Path | None = None) -> dict[str, Any]:
     }
 
 
-def integrated_skill_files() -> list[tuple[Path, str]]:
-    """List only self-contained skill files and standalone installation docs."""
-    skill_name = CONFIG["integrated_skill_name"]
-    skill_root = PROJECT_ROOT / ".agents" / "skills" / skill_name
-    files: list[tuple[Path, str]] = []
-    for path in skill_root.rglob("*"):
-        if path.is_symlink() or not path.is_file():
-            continue
-        relative = path.relative_to(PROJECT_ROOT)
-        if should_package(relative) and is_public_skill_file(relative):
-            files.append((relative, f"skill/{path.relative_to(skill_root).as_posix()}"))
-    for relative in (
-        Path("install-global.py"),
-        Path("install-global.sh"),
-        Path("install-global.ps1"),
-        Path("install-global.cmd"),
-        Path("docs/GLOBAL-INSTALL.md"),
-        Path("NOTICE.md"),
-    ):
-        if not (PROJECT_ROOT / relative).is_file():
-            raise RuntimeError(f"Integrated skill release is incomplete; missing: {relative}")
-        files.append((relative, relative.as_posix()))
-    return sorted(files, key=lambda entry: entry[1])
-
-
-def create_skill_release(destination: Path | None = None) -> dict[str, Any]:
-    """Build a deterministic skill-only ZIP without classroom PDFs or project data."""
-    assert_versions_current()
-    skill_root = (
-        PROJECT_ROOT / ".agents" / "skills" / CONFIG["integrated_skill_name"]
-    )
-    skill_version = (skill_root / "VERSION").read_text(encoding="utf-8").strip()
-    version_match = re.search(r"v\d+\.\d+\.\d+", skill_version)
-    if version_match is None:
-        raise RuntimeError("Integrated skill version has no semantic component.")
-    version = version_match.group(0)
-    archive_root = f"{CONFIG['integrated_skill_name']}-{version}"
-    destination = (
-        (PROJECT_ROOT / "dist" / f"{archive_root}.zip")
-        if destination is None else destination.expanduser().absolute()
-    )
-    if destination.suffix.lower() != ".zip":
-        destination = destination.with_suffix(".zip")
-    files = integrated_skill_files()
-    required = {"skill/SKILL.md", "skill/VERSION", "install-global.py", "install-global.sh", "install-global.ps1"}
-    present = {archive_name for _, archive_name in files}
-    missing = sorted(required.difference(present))
-    if missing:
-        raise RuntimeError("Integrated skill release is incomplete: " + ", ".join(missing))
-    for relative, archive_name in files:
-        if Path(archive_name).suffix.lower() in {".pdf", ".pptx"}:
-            raise RuntimeError(f"Private paper or deck cannot enter a skill-only release: {relative}")
-        if relative.suffix.lower() in TEXT_SUFFIXES:
-            data = (PROJECT_ROOT / relative).read_bytes()
-            if str(Path.home()).encode("utf-8") in data or PERSONAL_PATH_RE.search(data):
-                raise RuntimeError(f"Personal absolute directory found in release file: {relative}")
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    manifest_lines = [
-        "Medical Journal PPTX Integrated global skill release manifest",
-        f"Integrated skill version: {skill_version}",
-        "", "SHA256  PATH",
-    ]
-    with zipfile.ZipFile(destination, "w", allowZip64=True) as archive:
-        for relative, archive_name in files:
-            source = PROJECT_ROOT / relative
-            data = source.read_bytes()
-            digest = hashlib.sha256(data).hexdigest()
-            manifest_lines.append(f"{digest}  {archive_name}")
-            archive.writestr(_zip_info(f"{archive_root}/{archive_name}", source), data)
-        info = zipfile.ZipInfo(f"{archive_root}/RELEASE-MANIFEST.txt", date_time=(2020, 1, 1, 0, 0, 0))
-        info.compress_type = zipfile.ZIP_DEFLATED
-        info.create_system = 3
-        info.external_attr = (stat.S_IFREG | 0o644) << 16
-        archive.writestr(info, ("\n".join(manifest_lines) + "\n").encode("utf-8"))
-    digest = hashlib.sha256(destination.read_bytes()).hexdigest()
-    checksum = destination.with_suffix(destination.suffix + ".sha256")
-    checksum.write_text(f"{digest}  {destination.name}\n", encoding="utf-8")
-    return {
-        "kind": "integrated-skill",
-        "archive": str(destination),
-        "sha256": digest,
-        "checksum_file": str(checksum),
-        "files": len(files) + 1,
-        "size_bytes": destination.stat().st_size,
-    }
-
-
 def assert_versions_current() -> None:
     changed = synchronize(PROJECT_ROOT)
     if changed:
@@ -339,16 +244,8 @@ def assert_versions_current() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path)
-    parser.add_argument("--kind", choices=("classroom", "skill", "all"), default="classroom")
     args = parser.parse_args()
-    if args.kind == "all":
-        if args.out is not None:
-            parser.error("--out cannot be combined with --kind all")
-        payload: Any = {"releases": [create_release(), create_skill_release()]}
-    elif args.kind == "skill":
-        payload = create_skill_release(args.out)
-    else:
-        payload = create_release(args.out)
+    payload = create_release(args.out)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 

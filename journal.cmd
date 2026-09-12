@@ -5,7 +5,7 @@ set "PROJECT_ROOT=%~dp0"
 set "PROJECT_PYTHON=%PROJECT_ROOT%.venv\Scripts\python.exe"
 
 if not exist "%PROJECT_PYTHON%" (
-  echo Project Python environment is missing. Run setup-windows.cmd first. 1>&2
+  echo Project Python environment is missing. Ask Codex to follow CODEX-START.md using setup-codex.ps1. 1>&2
   exit /b 1
 )
 

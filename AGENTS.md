@@ -1,23 +1,24 @@
-# Portable medical-journal classroom project
+# Single-workflow medical-journal project
 
-This repository is a standalone teaching project. Resolve every path from the
-repository root containing `.classroom-project.json`; never use a developer's
-username, Desktop path, Google Drive path, or an environment from another copy.
+For a repository URL or beginner onboarding request, read `CODEX-START.md` first
+and guide the user through the actual authorized local setup. Do not return a
+manual installation assignment. A bare URL is not execution consent: ask one
+short intent question when necessary; do not repeat it after installation is
+already requested. Follow workspace rules, approvals, and organizational policy.
 
-- Prefer the repository skill `$medical-journal-to-pptx-classroom`.
-- The separate `$medical-journal-to-pptx-integrated` skill is self-contained;
-  install it globally with `install-global.py` when use outside this project is
-  requested. Preserve the repository classroom workflow and existing skills.
-- Use the repository `.venv` through `./journal` on macOS/Linux or
-  `journal.cmd` on Windows. Run `journal doctor` before a presentation task.
-- Save final `.pptx` and optional `.pdf` files directly in `outputs/`.
-- Keep extraction assets, manifests, deck specs, QA reports, and previews in
-  `.skill-work/<run-id>/`; never publish these files.
-- `full` is the only presentation mode and means the complete 40-55 slide
-  workflow. Preserve English slide text and Traditional Chinese notes.
-- Do not silently overwrite an existing presentation.
-- Treat student papers and clinical material as private. Never upload, commit,
-  publish, or share a PDF, patient data, generated deck, or credentials unless
-  the user explicitly asks for that particular action.
-- The classroom demo is synthetic. Its results are fictional and must never be
-  represented as clinical evidence.
+- The sole skill is `.agents/skills/medical-journal-to-pptx-classroom/SKILL.md`.
+- Use `setup-codex.sh` or `setup-codex.ps1`; no alternative/global installer.
+- Resolve paths from the root containing `.classroom-project.json`.
+- Use this project's `.venv` through `journal` / `journal.cmd`.
+- Only a successful current setup receipt allows proceeding to skill reading.
+- Actually read the complete skill, then request the user's PDF. Do not claim
+  that an installer can attest model loading, login, or quota.
+- With a readable PDF, report its title and page count, then execute the full
+  workflow without unnecessary outline-approval or repeated prompt stages.
+- Save final PPTX and optional PDF in `outputs/`; keep specs, assets and QA in
+  `.skill-work/<run-id>/`. Never overwrite an unrelated existing presentation.
+- Preserve 40–55 English slides, Traditional Chinese notes, figure provenance,
+  grayscale protection, prebuild QA, final QA and honest optional-render status.
+- Never change QA rules to obtain a pass or invent clinical findings.
+- Do not publish papers, decks, patient information or credentials. The bundled
+  synthetic paper is for automated testing, not the student's default article.

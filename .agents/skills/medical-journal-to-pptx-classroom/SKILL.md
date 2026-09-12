@@ -43,8 +43,9 @@ Write finished PowerPoint and optional PDF files directly into `outputs/`.
 Keep extraction assets, intermediate images, manifests, specs, and previews in
 `.skill-work/<run-id>/`. Never overwrite an unrelated existing output.
 
-If required Python packages are missing, ask the user to run
-`setup-macos.command` or `setup-windows.cmd`. Missing LibreOffice or Poppler
+If required Python packages are missing, follow root `CODEX-START.md` and
+run the authorized `setup-codex.sh` / `setup-codex.ps1` locally. Do not hand
+manual installation commands back to the student. Missing LibreOffice or Poppler
 must not prevent generating the editable `.pptx`; explain which optional PDF
 export or preview step could not run.
 

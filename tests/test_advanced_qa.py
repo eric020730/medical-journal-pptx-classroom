@@ -17,7 +17,7 @@ SKILL_SCRIPTS = (
     PROJECT_ROOT
     / ".agents"
     / "skills"
-    / "medical-journal-to-pptx-integrated"
+    / "medical-journal-to-pptx-classroom"
     / "scripts"
 )
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
