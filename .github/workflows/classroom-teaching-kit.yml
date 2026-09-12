@@ -1,0 +1,42 @@
+name: Build fixed classroom teaching kit
+on:
+  push:
+    branches: ['teaching/**']
+  pull_request:
+    paths:
+      - 'START-HERE.md'
+      - 'check-classroom-*'
+      - 'docs/CLASSROOM-*'
+      - 'tools/classroom_preflight.py'
+      - 'tools/package_teaching_kit.py'
+      - 'tests/test_classroom_teaching.py'
+      - '.github/workflows/classroom-teaching-kit.yml'
+permissions:
+  contents: read
+jobs:
+  teaching-kit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run readiness contracts
+        run: python -m unittest discover -s tests -p test_classroom_teaching.py -v
+      - name: Generate synthetic paper and test the core pipeline
+        run: |
+          python tools/classroom.py demo
+          python tools/classroom.py doctor
+          python tools/classroom.py smoke-test
+      - name: Build privacy-safe fixed teaching archive
+        run: python tools/package_teaching_kit.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classroom-teaching-kit-20260914
+          path: |
+            dist/medical-journal-pptx-classroom-teaching-*.zip
+            dist/medical-journal-pptx-classroom-teaching-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
