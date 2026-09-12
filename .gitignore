@@ -35,3 +35,8 @@ Thumbs.db
 diagnostics.json
 *.pptx.qa.json
 /RELEASE-MANIFEST.txt
+
+# Project-local Codex bootstrap binaries, caches and managed Python.
+.bootstrap/
+/TEACHING-BUILD.json
+/README-FIRST.txt

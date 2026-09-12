@@ -10,9 +10,15 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-KIT_VERSION = "2026.09.14-r1"
+KIT_VERSION = "2026.09.14-r2"
 BASE_COMMIT = "ee5f0975f403d1edb0e7e1e244482b1fdc136295"
 ADDITIONS = (
+    "CODEX-START.md",
+    "setup-codex.sh",
+    "setup-codex.ps1",
+    "tools/codex_setup.py",
+    "tests/test_codex_setup.py",
+    ".github/workflows/codex-onboarding.yml",
     "START-HERE.md",
     "check-classroom-macos.command",
     "check-classroom-windows.cmd",
@@ -76,8 +82,8 @@ def build() -> Path:
             json.dumps(build_info, ensure_ascii=False, indent=2) + "\n").encode()
         entries[f"{root}/README-FIRST.txt"] = (
             "2026-09-14 classroom teaching kit\n"
-            "Open docs/CLASSROOM-STUDENT-GUIDE.html in your browser.\n"
-            "Use only the classroom route. Start with START-HERE.md.\n"
+            "Give CODEX-START.md to Codex for automated local setup.\n"
+            "Use only the classroom route. Older guides are troubleshooting references.\n"
             "Requires internet for app login and dependency installation.\n"
         ).encode()
         manifest = [f"Teaching kit: {KIT_VERSION}", "SHA256  PATH"]
