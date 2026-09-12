@@ -57,6 +57,16 @@ If any required package, LibreOffice or Poppler is missing, follow root `CODEX-S
 
 For note conventions, read `references/notes_style.md` when writing notes. For complex crops, read `references/article_level_crop_design.md`. The complete original image pipeline remains under `scripts/`.
 
+## Table crop acceptance (including EMF)
+
+Read `references/article_level_crop_design.md` for every table crop. Validate
+reviewed PDF bounds and title/header/last-row/footnote anchors before export.
+Add white padding on a new canvas after cropping, without expanding source bounds.
+Compare every table's original page, final asset and rendered slide at readable
+size. A contact sheet alone cannot establish completeness or absence of adjacent
+prose. Record structural QA and visual review separately; unresolved visual defects
+prevent a full-quality completion claim.
+
 ## Safety and classroom constraints
 
 - Use only user-authorized papers. Do not commit source PDFs, generated decks or identifiable patient data.

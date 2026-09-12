@@ -4,6 +4,21 @@
 
 Produce one usable crop per article Figure/Table item, not one crop per PDF image object.
 
+## Table acceptance across formats
+
+PNG and EMF follow the same source-boundary and semantic review requirements.
+For `vector-table`, repeat `--expected-text` for the reviewed title, column heading,
+last row and footnote text. The command checks partial text/image/vector boundaries
+before export and records provenance. Padding creates blank canvas outside the
+validated crop, without reading additional source-page content.
+
+Anchors do not detect all unwanted prose: a crop can include every anchor and still
+include a neighboring paragraph. Inspect the original page, final asset and rendered
+slide individually at readable size. Check all four edges, all rows/columns and
+footnotes, and reject neighboring headings, body text or page furniture. Record each
+asset's source page, reviewed bounds, row coverage, footnotes and visual result in
+the run review. Structural pass is provisional until this comparison is complete.
+
 ## Pipeline
 
 1. Render pages and extract text/words as in v0.2.4.

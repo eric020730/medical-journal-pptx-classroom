@@ -916,6 +916,25 @@ def recompose_panels_command(args: argparse.Namespace) -> None:
           f"fit={args.fit}, inset={args.inset}, gap={gap}px")
 
 
+def padded_table_page(doc, page_number, bbox, anchors, pad_x, pad_top, pad_bottom):
+    """Validate the source rectangle, then add blank space on a new PDF page."""
+    import math
+    import pymupdf as fitz
+    from source_crops import region, source_page
+    if not anchors:
+        raise ValueError("Tables require title/header/last-row/footnote anchors")
+    if any(not math.isfinite(v) or v < 0 for v in (pad_x, pad_top, pad_bottom)):
+        raise ValueError("Padding must be finite and nonnegative")
+    source = source_page(doc, page_number)
+    rect, _ = region(source, bbox, anchors)
+    padded = fitz.open()
+    page = padded.new_page(width=rect.width + 2 * pad_x,
+                           height=rect.height + pad_top + pad_bottom)
+    page.show_pdf_page(fitz.Rect(pad_x, pad_top, pad_x + rect.width,
+                                pad_top + rect.height), doc, page_number - 1, clip=rect)
+    return padded
+
+
 def vector_table_command(args: argparse.Namespace) -> None:
     """Render a table region from the PDF as a VECTOR EMF (no rasterisation).
 
@@ -932,10 +951,9 @@ def vector_table_command(args: argparse.Namespace) -> None:
         raise SystemExit("PyMuPDF required: pip install pymupdf") from e
     x0, y0, x1, y1 = [float(v) for v in args.bbox.split(",")]
     doc = fitz.open(args.pdf)
-    pg = doc[args.page - 1]
-    X0 = max(0, x0 - args.pad_x); X1 = min(pg.rect.width, x1 + args.pad_x)
-    Y0 = max(0, y0 - args.pad_top); Y1 = min(pg.rect.height, y1 + args.pad_bottom)
-    pg.set_cropbox(fitz.Rect(X0, Y0, X1, Y1))
+    padded = padded_table_page(doc, args.page, [x0, y0, x1, y1],
+                               args.expected_text, args.pad_x, args.pad_top, args.pad_bottom)
+    pg = padded[0]
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
@@ -960,7 +978,14 @@ def vector_table_command(args: argparse.Namespace) -> None:
         if not emf.exists():
             raise SystemExit("EMF conversion failed (is LibreOffice installed?)")
         out.write_bytes(emf.read_bytes())
-    aspect = round((X1 - X0) / (Y1 - Y0), 4)
+    aspect = round(pg.rect.width / pg.rect.height, 4)
+    write_postprocess_meta(out, "vector-table", Path(args.pdf),
+                           asset_type="table", page=args.page, bbox=[x0, y0, x1, y1],
+                           expected_text=args.expected_text, padding_mode="blank_canvas",
+                           pad_x=args.pad_x, pad_top=args.pad_top, pad_bottom=args.pad_bottom,
+                           status="STRUCTURAL_PASS_VISUAL_REVIEW_REQUIRED")
+    padded.close()
+    doc.close()
     print(f"wrote {out} (vector EMF); image_aspect={aspect}")
     print(f'spec: "image": "{out.name}", "image_aspect": {aspect}')
 
@@ -1170,6 +1195,8 @@ def main() -> None:
     vt.add_argument("--page", type=int, required=True, help="1-based page number")
     vt.add_argument("--bbox", required=True, help="x0,y0,x1,y1 in PDF points")
     vt.add_argument("--pad-x", type=float, default=15.0)
+    vt.add_argument("--expected-text", action="append", required=True,
+                    help="Repeat for reviewed title, header, last-row and footnote anchors")
     vt.add_argument("--pad-top", type=float, default=6.0)
     vt.add_argument("--pad-bottom", type=float, default=10.0)
     vt.add_argument("--soffice", default="soffice", help="LibreOffice binary")

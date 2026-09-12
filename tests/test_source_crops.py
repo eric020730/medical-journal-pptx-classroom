@@ -15,10 +15,30 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / '.agents/skills/medical-journal-to-pptx-classroom/scripts'))
 sys.path.insert(0, str(ROOT / 'tools'))
 import source_crops as crops
+import postprocess_assets as postprocess
 import classroom
 
 
 class SourceCropTests(unittest.TestCase):
+    def test_vector_padding_excludes_neighboring_content(self):
+        with fitz.open() as doc:
+            page = doc.new_page(width=300, height=300)
+            page.insert_text((30, 40), 'TABLE')
+            page.draw_rect(fitz.Rect(105, 20, 120, 60), fill=(1, 0, 0))
+            page.draw_rect(fitz.Rect(20, 105, 60, 120), fill=(1, 0, 0))
+            padded = postprocess.padded_table_page(doc, 1, [10, 10, 100, 100],
+                                                   ['TABLE'], 30, 30, 30)
+            self.addCleanup(padded.close)
+            self.assertEqual(padded[0].rect.width, 150)
+            pix = padded[0].get_pixmap(alpha=False)
+            im = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
+            self.assertTrue(any(max(pixel) < 200 for pixel in im.getdata()))
+            self.assertFalse(any(r > 200 and g < 80 and b < 80 for r, g, b in im.getdata()))
+            with self.assertRaisesRegex(ValueError, 'Missing expected text'):
+                postprocess.padded_table_page(doc, 1, [10, 10, 100, 100], ['absent'], 0, 0, 0)
+            with self.assertRaisesRegex(ValueError, 'Crop cuts text'):
+                postprocess.padded_table_page(doc, 1, [35, 10, 100, 100], ['TABLE'], 0, 0, 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
