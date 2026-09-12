@@ -9,4 +9,8 @@ if [[ ! -x "${PROJECT_PYTHON}" ]]; then
   exit 1
 fi
 
+export PIXI_HOME="${PROJECT_ROOT}/.bootstrap/pixi-home"
+export PIXI_CACHE_DIR="${PROJECT_ROOT}/.bootstrap/pixi-cache"
+export PIXI_NO_PATH_UPDATE=1
+export PATH="${PROJECT_ROOT}/.bootstrap/pixi-home/bin:${PROJECT_ROOT}/.bootstrap/libreoffice/LibreOffice.app/Contents/MacOS:${PROJECT_ROOT}/.bootstrap/libreoffice/program:${PATH}"
 exec "${PROJECT_PYTHON}" "${PROJECT_ROOT}/tools/classroom.py" "$@"

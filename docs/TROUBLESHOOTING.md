@@ -1,33 +1,35 @@
 # 自動流程遇到問題
 
-本文件給正在協助學生的 Codex／教師使用，不是另一套學生安裝課程。只有一個入口：回到 [CODEX-START.md](../CODEX-START.md)，從失敗階段接續。
+本文件給協助學生的 Codex／教師使用。唯一入口仍是 [CODEX-START.md](../CODEX-START.md)，從失敗階段接續。
 
 | 卡住的位置 | Codex 應採取的下一步 |
 | --- | --- |
-| 只有一般聊天或遠端 Cloud | 引導登入支援本機執行的 Codex，選可寫入 Local 資料夾；不能宣稱已安裝到學生電腦。 |
-| 只貼網址，沒有說要安裝 | 用一句話確認本機安裝意圖。已授權就不重複詢問。 |
-| 工作資料夾已有其他內容 | 不清空、不直接覆蓋；安全辨識同一版本或請選空白資料夾。 |
-| 下載、TLS、雜湊或執行政策失敗 | 停在該關，說明失敗項目及最小必要批准；不關閉防毒、不忽略 TLS／雜湊、不繞過機構政策。 |
-| `.venv` 損壞／版本不相容 | 保留現況，不擅自刪除；先說明，再取得處理授權。 |
-| setup.lock 已存在 | 確認是否仍有安裝程序；不可盲目刪鎖或同時跑兩個安裝。 |
-| skill 選單還沒出現 | 實際讀完整 repository `SKILL.md` 並依其流程工作；必要時刷新任務，不能只看檔案存在就宣稱讀取。 |
-| PDF 附件沒有本機可讀路徑 | 明確指出本專案 `sample-papers` 的完整位置，請學生放入；不得猜測附件路徑。 |
-| 多篇、加密、錯篇、缺頁或病人個資 | 暫停處理，只問解決阻礙必要的一個問題；不捏造讀不到的內容。 |
-| 額度不足或中斷 | 保留同一任務、`.skill-work` 與輸出，恢復後從紀錄接續，不重新安裝或重做已完成階段。 |
-| 建檔前／後 QA 失敗 | 修正規格或素材，再跑原有 gate；不得修改檢查標準來取得通過。 |
+| 只有一般聊天或遠端 Cloud | 引導學生使用支援 Local workspace 的 Codex；不能宣稱已安裝到學生電腦。 |
+| 工作資料夾已有其他內容 | 不清空、不覆蓋；辨識同一版本或改用新的空白資料夾。 |
+| 下載、TLS、雜湊或防毒阻擋 | 說明哪一項失敗及最小必要批准；不關閉防毒、不忽略驗證、不繞過機構政策。 |
+| 磁碟空間不足 | 清出足夠空間後從 setup 接續；LibreOffice、Poppler、Python 與 cache 需要額外空間。 |
+| `.venv` 損壞或版本不相容 | 保留現況，說明後再取得刪除／重建授權。 |
+| `setup.lock` 已存在 | 確認是否仍有安裝程序；不可盲目刪鎖或同時執行兩次。 |
+| LibreOffice／Poppler 安裝或版本檢查失敗 | 停在 `SETUP_BLOCKED`；不得降級為 PPTX-only。檢查網路、架構、磁碟與機構政策後重跑同一 setup。 |
+| 合成 PPTX 可建檔但 render 失敗 | 視為完整環境未通過；查看 LibreOffice/Poppler 階段，修復後重跑，不要求學生先交論文。 |
+| skill 選單未出現 | 直接讀取完整 repository `SKILL.md`；檔案存在不能代替模型讀取。 |
+| PDF 附件沒有本機路徑 | 指出本專案 `sample-papers` 完整位置，請學生放入；不得猜測掛載路徑。 |
+| 多篇、加密、錯篇、缺頁或病人個資 | 暫停，只問解除阻礙所需的一個問題。 |
+| 額度不足或工作中斷 | 保留 `.skill-work` 與輸出，恢復後接續，不重新安裝或重做已完成階段。 |
+| spec/final/render QA 失敗 | 修正規格或素材，再跑原 gate；不得修改檢查標準取得通過。 |
 
 ## 安裝與驗證
 
-由 Codex 在專案根目錄執行 `bash setup-codex.sh`（macOS／Linux）或 `./setup-codex.ps1`（原生 Windows）。這兩個檔案是同一流程的作業系統版本，不是兩種產品。
+由 Codex 在專案根目錄執行 `bash setup-codex.sh` 或 `.\setup-codex.ps1`。完整成功條件是：
 
-必要套件符合 `requirements.txt` 且 `doctor`／`smoke-test` 成功後，`.skill-work/codex-setup.json` 才會是 `LOCAL_READY_SKILL_PENDING`。這只證明本機工具成功，Codex 還必須讀取 skill 才能提示提供 PDF。舊 receipt 不能替代本次命令成功；登入及剩餘額度必須如實表示未由安裝器驗證。
+- Python 與必要套件通過
+- 固定版本 LibreOffice、Poppler 通過
+- 合成 smoke-test 通過
+- 合成 PPTX 實際轉成 PDF
+- slide preview/contact sheet 實際產生
 
-## PDF 匯出是選用，不擋 PPTX
-
-先交付可編輯的 PPTX。當使用者另外要求 PDF 或渲染檢查時，Codex 先偵測 LibreOffice／Poppler；缺少時說明安裝來源、系統改動和批准要求，再使用官方安裝方式。不自動增加套件管理器或要求學生自行跑指令。
-
-工具就緒後，透過 `journal render <實際PPTX> --preview`（Windows 用 `journal.cmd`）匯出；實際開啟渲染圖檢查才算完成視覺 QA。沒有工具或匯出失敗時，明確標示未完成，不宣稱通過。
+只有 `.skill-work/codex-setup.json` 顯示 `FULL_QA_READY_SKILL_PENDING`，Codex 才能讀 skill 並要求論文。舊 receipt 不能取代本次命令。
 
 ## 隱私
 
-回報給老師的是失敗階段與去識別摘要，不是完整路徑、原始日誌、論文全文或帳密。不要把學生 PDF、PPTX、`.bootstrap`、`.venv`、`.skill-work` 提交到 GitHub。
+回報教師的是失敗階段與去識別摘要，不是完整路徑、原始日誌、論文全文或帳密。不要把 PDF、PPTX、`.bootstrap`、`.venv` 或 `.skill-work` 提交到 GitHub。
