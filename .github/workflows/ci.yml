@@ -8,7 +8,7 @@ permissions:
   contents: read
 jobs:
   bootstrap:
-    name: Managed Python / ${{ matrix.os }}
+    name: Full rendered setup / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -16,18 +16,19 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      # No preinstalled Python is used: bootstrap must download into .bootstrap.
-      - name: Install and verify (Unix)
+      # Setup must provision managed Python, fixed LibreOffice + Poppler and
+      # complete a synthetic PPTX -> PDF -> preview render before returning 0.
+      - name: Install and verify full quality pipeline (Unix)
         if: runner.os != 'Windows'
         run: |
           bash setup-codex.sh
-          ./journal doctor
-      - name: Install and verify (Windows)
+          ./journal doctor --strict
+      - name: Install and verify full quality pipeline (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           ./setup-codex.ps1
-          ./journal.cmd doctor
+          ./journal.cmd doctor --strict
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Regression, packaging, and repeat install (Unix)
         if: runner.os != 'Windows'
@@ -42,8 +43,6 @@ jobs:
       - name: Regression, packaging, and repeat install (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        # Tests invoke helpers directly; match journal.cmd / subprocess_environment.
-        # Keep the earlier fresh-install and launcher steps on the native defaults.
         env:
           PYTHONUTF8: '1'
         run: |
@@ -59,14 +58,14 @@ jobs:
           & $py tools/package_release.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./setup-codex.ps1
-      - name: Verify the actual ZIP in a fresh folder (Unix)
+      - name: Verify shipped ZIP in a fresh folder (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir .skill-work/archive-check
           .venv/bin/python -c "import glob,zipfile; zipfile.ZipFile(glob.glob('dist/*.zip')[0]).extractall('.skill-work/archive-check')"
           cd .skill-work/archive-check/medical-journal-pptx-classroom
           bash setup-codex.sh
-      - name: Verify the actual ZIP in a fresh folder (Windows)
+      - name: Verify shipped ZIP in a fresh folder (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -89,7 +88,7 @@ jobs:
           path: .skill-work/codex-setup.json
           if-no-files-found: warn
   compatibility:
-    name: Python ${{ matrix.python }} / Ubuntu
+    name: Core Python ${{ matrix.python }} / Ubuntu
     strategy:
       fail-fast: false
       matrix:

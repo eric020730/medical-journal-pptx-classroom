@@ -1,6 +1,6 @@
 {
   "project_name": "medical-journal-pptx-classroom",
-  "classroom_version": "4.5.0",
+  "classroom_version": "4.6.0",
   "skill_name": "medical-journal-to-pptx-classroom",
   "classroom_skill_version": "v0.2.38-bg-aware-trim",
   "python_minimum": "3.11",
@@ -14,7 +14,7 @@
     "full": {
       "minimum_slides": 40,
       "maximum_slides": 55,
-      "description": "Complete medical-journal teaching workflow"
+      "description": "Complete medical-journal teaching workflow with mandatory rendered visual QA"
     }
   }
 }

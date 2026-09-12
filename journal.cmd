@@ -9,5 +9,9 @@ if not exist "%PROJECT_PYTHON%" (
   exit /b 1
 )
 
+set "PIXI_HOME=%PROJECT_ROOT%.bootstrap\pixi-home"
+set "PIXI_CACHE_DIR=%PROJECT_ROOT%.bootstrap\pixi-cache"
+set "PIXI_NO_PATH_UPDATE=1"
+set "PATH=%PROJECT_ROOT%.bootstrap\pixi-home\bin;%PROJECT_ROOT%.bootstrap\libreoffice\program;%PATH%"
 "%PROJECT_PYTHON%" "%PROJECT_ROOT%tools\classroom.py" %*
 exit /b %ERRORLEVEL%
