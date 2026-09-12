@@ -15,14 +15,15 @@ sys.path.insert(0, str(ROOT / "tools"))
 import codex_setup as setup
 import classroom_preflight
 
-QUALITY_PATH = (
+SKILL_SCRIPTS = (
     ROOT
     / ".agents"
     / "skills"
     / "medical-journal-to-pptx-classroom"
     / "scripts"
-    / "quality_tools.py"
 )
+QUALITY_PATH = SKILL_SCRIPTS / "quality_tools.py"
+WINDOWS_QUALITY_PATH = SKILL_SCRIPTS / "quality_tools_windows.py"
 QUALITY_SPEC = importlib.util.spec_from_file_location("quality_tools", QUALITY_PATH)
 quality_tools = importlib.util.module_from_spec(QUALITY_SPEC)
 assert QUALITY_SPEC.loader is not None
@@ -140,7 +141,7 @@ class ReadinessTests(unittest.TestCase):
 
 
 class DistributionTests(unittest.TestCase):
-    def test_installers_and_quality_tool_are_in_release(self):
+    def test_installers_and_quality_tools_are_in_release(self):
         from package_release import should_package
 
         for path in (
@@ -149,12 +150,14 @@ class DistributionTests(unittest.TestCase):
             "setup-codex.ps1",
             "tools/codex_setup.py",
             ".agents/skills/medical-journal-to-pptx-classroom/scripts/quality_tools.py",
+            ".agents/skills/medical-journal-to-pptx-classroom/scripts/quality_tools_windows.py",
         ):
             self.assertTrue(should_package(Path(path)), path)
 
     def test_no_package_manager_or_policy_bypass(self):
-        for name in ("setup-codex.sh", "setup-codex.ps1"):
-            data = (ROOT / name).read_text(encoding="utf-8").lower()
+        unix = (ROOT / "setup-codex.sh").read_text(encoding="utf-8").lower()
+        windows = (ROOT / "setup-codex.ps1").read_text(encoding="utf-8").lower()
+        for data in (unix, windows):
             for forbidden in (
                 "sudo ",
                 "brew install",
@@ -167,8 +170,15 @@ class DistributionTests(unittest.TestCase):
                 "pip install --system",
             ):
                 self.assertNotIn(forbidden, data)
-            self.assertIn("quality_tools.py", data)
             self.assertNotIn("\\skils\\", data)
+        self.assertIn("quality_tools.py", unix)
+        self.assertIn("quality_tools_windows.py", windows)
+
+    def test_windows_uses_console_libreoffice_launcher(self):
+        wrapper = WINDOWS_QUALITY_PATH.read_text(encoding="utf-8")
+        self.assertIn('"soffice.com"', wrapper)
+        self.assertIn("quality_tools.soffice_path = windows_soffice_path", wrapper)
+        self.assertNotIn('"soffice.exe"', wrapper)
 
     def test_fixed_quality_assets_use_https_and_sha256(self):
         assets = [

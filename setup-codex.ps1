@@ -41,7 +41,7 @@ try {
         }
     }
     $Python = Join-Path $Root '.venv\Scripts\python.exe'
-    $Quality = Join-Path $Root '.agents\skills\medical-journal-to-pptx-classroom\scripts\quality_tools.py'
+    $Quality = Join-Path $Root '.agents\skills\medical-journal-to-pptx-classroom\scripts\quality_tools_windows.py'
     Set-QualityPath
 
     if ($CheckOnly) {
