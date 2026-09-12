@@ -1,5 +1,7 @@
 import copy
 import io
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -75,6 +77,75 @@ class SourceCropTests(unittest.TestCase):
                         'panels':[{'label':'B'}, {'label':'A'}]}]
         with self.assertRaisesRegex(ValueError, 'order mismatch'):
             crops.generate(p, self.root/'out')
+
+    def test_body_text_cannot_replace_table(self):
+        p = copy.deepcopy(self.plan)
+        p['assets'][0]['bbox'] = [10, 80, 280, 190]
+        with self.assertRaisesRegex(ValueError, 'Missing expected text'):
+            crops.generate(p, self.root/'out')
+
+    def test_invalid_page_and_generated_filename_collision_rejected(self):
+        p = copy.deepcopy(self.plan)
+        p['assets'][0]['page'] = 0
+        with self.assertRaisesRegex(ValueError, 'one-based'):
+            crops.generate(p, self.root/'out')
+        p = copy.deepcopy(self.plan)
+        second = copy.deepcopy(p['assets'][0])
+        second['id'] = 'Table_1A'; second.pop('splits')
+        p['assets'].append(second); p['expected_assets'].append('Table_1A')
+        with self.assertRaisesRegex(ValueError, 'filenames collide'):
+            crops.generate(p, self.root/'out')
+        self.assertFalse((self.root/'out').exists())
+
+    def test_image_only_export_preserves_content_and_banded_design(self):
+        pdf = self.root/'figures.pdf'
+        with fitz.open() as doc:
+            page = doc.new_page(width=400, height=300)
+            for rect, label, color in [(fitz.Rect(20,20,120,120),'A','red'),
+                                        (fitz.Rect(150,20,200,170),'B','blue')]:
+                stream = io.BytesIO()
+                Image.new('RGB', (int(rect.width),int(rect.height)), color).save(stream,format='PNG')
+                page.insert_image(rect,stream=stream.getvalue())
+                page.insert_text((rect.x1-10,rect.y1+15),label)
+            doc.save(pdf)
+        plan = {'pdf':str(pdf), 'source_sha256':crops.digest(pdf), 'dpi':72,
+                'expected_assets':['Figure_1'], 'assets':[
+                    {'id':'Figure_1', 'type':'figure', 'expected_labels':['A','B'],
+                     'export_image_panels':True, 'panels':[
+                         {'label':'A','page':1,'bbox':[19,19,121,140]},
+                         {'label':'B','page':1,'bbox':[149,19,201,190]}]}]}
+        out = self.root/'out'
+        crops.generate(plan,out)
+        with fitz.open(pdf) as doc:
+            for label, expected in [('A',(19.7,19.7,120.3,120.3)),('B',(149.7,19.7,200.3,170.3))]:
+                path = out/f'Figure_1_{label}_image.png'
+                with Image.open(path) as image:
+                    reference = crops.render(doc[0],fitz.Rect(expected),72)
+                    self.assertEqual(image.size,reference.size)
+                    self.assertEqual(image.tobytes(),reference.tobytes())
+                meta=json.loads(path.with_suffix('.png.postprocess.json').read_text())
+                self.assertEqual(meta['image_region']['original_panel'],label)
+                self.assertEqual(meta['margin'],0)
+        script=ROOT/'.agents/skills/medical-journal-to-pptx-classroom/scripts/recompose_panels_banded.py'
+        subprocess.run([sys.executable,str(script),str(out/'final.png'),'--inputs',
+                        str(out/'Figure_1_A_image.png'),str(out/'Figure_1_B_image.png'),
+                        '--cols','2','--labels','A,B','--geometry',str(out/'geometry.json'),
+                        '--no-trim'],check=True,capture_output=True)
+        geometry=json.loads((out/'geometry.json').read_text())['final']
+        self.assertEqual([g['label'] for g in geometry],['A','B'])
+        self.assertEqual(geometry[0]['fy_center'],geometry[1]['fy_center'])
+        with Image.open(out/'final.png') as image:
+            self.assertEqual(image.getpixel((0,image.height-1)),(6,20,40))
+
+    def test_image_only_export_rejects_ambiguous_or_absent_images(self):
+        with fitz.open(self.pdf) as doc:
+            with self.assertRaisesRegex(ValueError, 'exactly one'):
+                crops.image_region(doc[0],doc[0].rect)
+            stream=io.BytesIO();Image.new('RGB',(10,10),'red').save(stream,format='PNG')
+            for x in [20,50]:
+                doc[0].insert_image(fitz.Rect(x,200,x+10,210),stream=stream.getvalue())
+            with self.assertRaisesRegex(ValueError, 'exactly one'):
+                crops.image_region(doc[0],doc[0].rect)
 
     def test_preview_includes_pages_after_six(self):
         pdf = self.root/'nine.pdf'

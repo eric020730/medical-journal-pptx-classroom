@@ -65,6 +65,31 @@ def render(page, rect, dpi):
     return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
 
+def image_region(page, reviewed):
+    """Separate image content from its printed label without cutting anatomy.
+
+    Only an unambiguous complete raster object is eligible. A small PDF-point
+    border allowance preserves the journal's thin vector frame. Validate the
+    result again; do not silently relax text/image/vector clipping checks.
+    """
+    reviewed = fitz.Rect(reviewed)
+    matches = [fitz.Rect(info['bbox']) for info in page.get_image_info()
+               if reviewed.contains(fitz.Rect(info['bbox']))]
+    if len(matches) != 1:
+        raise ValueError('Image-only export needs exactly one complete source image per panel')
+    bounds = matches[0] + (-0.3, -0.3, 0.3, 0.3)
+    if not reviewed.contains(bounds):
+        raise ValueError('Reviewed panel must include the complete image border')
+    rect, text = region(page, list(bounds))
+    return rect
+
+
+def source_page(document, number):
+    if isinstance(number, bool) or not isinstance(number, int) or not 1 <= number <= len(document):
+        raise ValueError('page must be a valid one-based PDF page number')
+    return document[number - 1]
+
+
 def stack(images, gap=16, margin=16):
     width = max(im.width for im in images)
     out = Image.new("RGB", (width + 2 * margin,
@@ -95,6 +120,8 @@ def generate(plan, output):
     if digest(source) != plan["source_sha256"]:
         raise ValueError("Source PDF hash differs from reviewed plan")
     ids = [a["id"] for a in plan["assets"]]
+    if not ids:
+        raise ValueError('Asset inventory must not be empty')
     if len(ids) != len(set(ids)) or set(ids) != set(plan["expected_assets"]):
         raise ValueError("Asset inventory mismatch/duplicate")
     if any(not re.fullmatch(r"[A-Za-z0-9_-]+", name) for name in ids):
@@ -109,8 +136,9 @@ def generate(plan, output):
     with fitz.open(source) as doc:
         for asset in plan["assets"]:
             parts = []
+            image_regions = {}
             if asset["type"] == "table":
-                page = doc[asset["page"]-1]
+                page = source_page(doc, asset['page'])
                 box, text = region(page, asset["bbox"], asset["expected_text"])
                 if not asset["expected_text"]:
                     raise ValueError("Tables require title/header/last-row/footnote anchors")
@@ -129,6 +157,9 @@ def generate(plan, output):
                     parts.append((asset["id"], stack([render(page, box, dpi)])))
             elif asset["type"] == "figure":
                 panels = asset["panels"]
+                columns = asset.get('columns', 2)
+                if not panels or isinstance(columns, bool) or not isinstance(columns, int) or columns < 1:
+                    raise ValueError('Figures require panels and a positive integer column count')
                 if [p["label"] for p in panels] != asset["expected_labels"]:
                     raise ValueError("Panel inventory/order mismatch")
                 if len(set(asset["expected_labels"])) != len(panels):
@@ -137,23 +168,32 @@ def generate(plan, output):
                     raise ValueError("Unsafe panel label")
                 ims = []
                 for panel in panels:
-                    page = doc[panel["page"]-1]
+                    page = source_page(doc, panel['page'])
                     rect, text = region(page, panel["bbox"], panel.get("expected_text", []))
                     if panel["label"] not in text.split():
                         raise ValueError("Include the original panel letter in the crop")
                     im = render(page, rect, dpi)
                     ims.append(im)
                     parts.append((asset["id"]+"_"+panel["label"], stack([im])))
-                parts.append((asset["id"], grid(ims, asset.get("columns", 2))))
+                    if asset.get('export_image_panels', False):
+                        content = image_region(page, rect)
+                        name = asset['id'] + '_' + panel['label'] + '_image'
+                        parts.append((name, render(page, content, dpi)))
+                        image_regions[name] = {'page': panel['page'], 'bbox': list(content),
+                                               'original_panel': panel['label']}
+                parts.append((asset["id"], grid(ims, columns)))
             else:
                 raise ValueError("Unknown asset type")
-            prepared.append((asset, parts))
+            prepared.append((asset, parts, image_regions))
+        names = [name for _, parts, _ in prepared for name, _ in parts]
+        if len(names) != len(set(names)):
+            raise ValueError('Generated filenames collide; choose distinct asset IDs')
         # Validate the entire plan before writing any outputs.
         output.mkdir(parents=True)
         report = {"source_sha256": digest(source), "status": "STRUCTURAL_PASS_VISUAL_REVIEW_REQUIRED", "assets": []}
         cards = []
         thumbnails = []
-        for asset, parts in prepared:
+        for asset, parts, image_regions in prepared:
             for name, im in parts:
                 path = output / (name + ".png")
                 im.save(path)
@@ -161,6 +201,11 @@ def generate(plan, output):
                         "source_sha256": report["source_sha256"], "output_sha256": digest(path),
                         "dpi": dpi, "margin": 16, "plan": asset,
                         "status": report["status"]}
+                if name in image_regions:
+                    meta.update({'margin': 0, 'image_region': image_regions[name],
+                                 'source_pdf': str(source), 'purpose': 'banded-composition-input'})
+                elif asset['type'] == 'figure':
+                    meta['purpose'] = 'source-review-not-slide-design'
                 path.with_suffix(".png.postprocess.json").write_text(json.dumps(meta, indent=2))
                 report["assets"].append({"id": name, "sha256": digest(path)})
                 if name == asset["id"] or asset["type"] == "table":
@@ -173,7 +218,7 @@ def generate(plan, output):
         grid(thumbnails).save(output / "contact-sheet.png")
         (output / "qa.json").write_text(json.dumps(report, indent=2))
         (output / "plan.json").write_text(json.dumps(plan, indent=2))
-        (output / "index.html").write_text('<meta charset="utf-8"><title>Source-coordinate crop review</title><style>body{font-family:system-ui;background:#edf1f5;padding:24px}section{background:white;padding:24px;margin:24px 0}img{max-width:100%;max-height:1100px}h2{font-size:24px}</style><h1>Source-coordinate crop review</h1><p>Structural checks are not a substitute for visual comparison with the source PDF. Original panel letters are preserved.</p>'+"".join(cards))
+        (output / "index.html").write_text('<meta charset="utf-8"><title>Source-coordinate crop review</title><style>body{font-family:system-ui;background:#edf1f5;padding:24px}section{background:white;padding:24px;margin:24px 0}img{max-width:100%;max-height:1100px}h2{font-size:24px}</style><h1>Source-coordinate crop review</h1><p>Structural checks are not a substitute for visual comparison with the source PDF. Original panel letters are preserved. Figure grids are source-review previews, not a replacement for the slide design. Use image-only panels with the banded compositor and native slide labels when preserving the classroom design.</p>'+"".join(cards))
     return report
 
 
