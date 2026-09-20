@@ -1,6 +1,6 @@
 # 論文 PDF → PowerPoint
 
-**唯一流程：把本專案連結交給本機 Codex → 自動準備完整品質環境與 repository skill → 提示提供 PDF → 製作並渲染檢查簡報。**
+**課堂預設流程：把本專案連結交給本機 Codex → 自動準備完整品質環境與 repository skill → 提示提供 PDF → 製作並渲染檢查簡報。**
 
 專案連結：<https://github.com/eric020730/medical-journal-pptx-classroom>
 
@@ -15,6 +15,13 @@
 > 請依 CODEX-START.md 自動準備完整品質環境、匯入並讀取 skill；完成後提示我提供 PDF，收到論文後直接製作、渲染及檢查簡報。
 
 學生不用先安裝 Python、Git、Homebrew、WinGet，不用修改 PATH、開終端機、複製 `.agents` 或安裝 global skill。
+
+## 已有本機工作區的使用者
+
+若要在其他資料夾直接製作簡報，可安裝同版的
+`medical-journal-to-pptx-integrated`。它保留 standard／nice 兩種版型、
+QA receipt 與 `qa-status`，並加入本版的 PDF 座標裁切、醫療影像白邊清理、
+PDF 匯出與全頁 preview 檢查。請見 [全域安裝說明](docs/GLOBAL-INSTALL.md)。
 
 ## 給讀到此頁的 Codex
 

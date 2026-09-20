@@ -1,4 +1,4 @@
-"""The shipped project has one complete route and no stale teaching links."""
+"""The shipped classroom route stays simple while the global skill remains releasable."""
 from __future__ import annotations
 import hashlib
 import json
@@ -18,16 +18,22 @@ import release_version
 
 
 class SingleWorkflowTests(unittest.TestCase):
-    def test_exactly_one_discoverable_skill(self):
+    def test_classroom_and_integrated_skills_are_both_discoverable(self):
         skills = list((ROOT / ".agents" / "skills").glob("*/SKILL.md"))
-        self.assertEqual([p.parent.name for p in skills], ["medical-journal-to-pptx-classroom"])
+        self.assertEqual(
+            {p.parent.name for p in skills},
+            {"medical-journal-to-pptx-classroom", "medical-journal-to-pptx-integrated"},
+        )
 
     def test_only_required_student_documents_remain(self):
         self.assertEqual({p.name for p in (ROOT / "docs").iterdir() if p.is_file()},
-                         {"PRIVACY.md", "TROUBLESHOOTING.md"})
+                         {"PRIVACY.md", "TROUBLESHOOTING.md", "GLOBAL-INSTALL.md"})
         self.assertEqual({p.name for p in ROOT.glob("setup-*")},
                          {"setup-codex.sh", "setup-codex.ps1"})
-        self.assertEqual(list(ROOT.glob("install-global*")), [])
+        self.assertEqual(
+            {p.name for p in ROOT.glob("install-global*")},
+            {"install-global.py", "install-global.sh", "install-global.ps1", "install-global.cmd"},
+        )
 
     def test_current_markdown_links_resolve(self):
         for p in [ROOT / "README.md", ROOT / "CODEX-START.md", *list((ROOT / "docs").glob("*.md"))]:
@@ -51,10 +57,22 @@ class SingleWorkflowTests(unittest.TestCase):
     def test_version_drift_blocks_packaging_and_is_repairable(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for name in ("VERSION", ".classroom-project.json"):
-                shutil.copyfile(ROOT / name, root / name)
+            for name in (
+                "VERSION", ".classroom-project.json", "README.md", "docs/GLOBAL-INSTALL.md",
+                ".agents/skills/medical-journal-to-pptx-integrated/SKILL.md",
+                ".agents/skills/medical-journal-to-pptx-integrated/VERSION",
+            ):
+                destination = root / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / name, destination)
             (root / "VERSION").write_text("9.8.7\n", encoding="utf-8")
-            self.assertEqual(release_version.synchronize(root), [".classroom-project.json"])
+            (root / ".agents/skills/medical-journal-to-pptx-integrated/VERSION").write_text(
+                "v9.8.7\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                set(release_version.synchronize(root)),
+                {".classroom-project.json", "docs/GLOBAL-INSTALL.md"},
+            )
             with mock.patch.object(package_release, "PROJECT_ROOT", root):
                 with self.assertRaisesRegex(RuntimeError, "metadata is stale"):
                     package_release.create_release(root / "blocked.zip")

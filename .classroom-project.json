@@ -16,5 +16,7 @@
       "maximum_slides": 55,
       "description": "Complete medical-journal teaching workflow with mandatory rendered visual QA"
     }
-  }
+  },
+  "integrated_skill_name": "medical-journal-to-pptx-integrated",
+  "integrated_skill_version": "v4.6.0"
 }
