@@ -1,23 +1,14 @@
-# Portable medical-journal classroom project
+# Single-workflow medical-journal project
 
-This repository is a standalone teaching project. Resolve every path from the
-repository root containing `.classroom-project.json`; never use a developer's
-username, Desktop path, Google Drive path, or an environment from another copy.
+For a repository URL or beginner onboarding request, read `CODEX-START.md` first and perform the authorized Local setup. Do not return a manual installation assignment.
 
-- Prefer the repository skill `$medical-journal-to-pptx-classroom`.
-- The separate `$medical-journal-to-pptx-integrated` skill is self-contained;
-  install it globally with `install-global.py` when use outside this project is
-  requested. Preserve the repository classroom workflow and existing skills.
-- Use the repository `.venv` through `./journal` on macOS/Linux or
-  `journal.cmd` on Windows. Run `journal doctor` before a presentation task.
-- Save final `.pptx` and optional `.pdf` files directly in `outputs/`.
-- Keep extraction assets, manifests, deck specs, QA reports, and previews in
-  `.skill-work/<run-id>/`; never publish these files.
-- `full` is the only presentation mode and means the complete 40-55 slide
-  workflow. Preserve English slide text and Traditional Chinese notes.
-- Do not silently overwrite an existing presentation.
-- Treat student papers and clinical material as private. Never upload, commit,
-  publish, or share a PDF, patient data, generated deck, or credentials unless
-  the user explicitly asks for that particular action.
-- The classroom demo is synthetic. Its results are fictional and must never be
-  represented as clinical evidence.
+- The sole skill is `.agents/skills/medical-journal-to-pptx-classroom/SKILL.md`.
+- Use only `setup-codex.sh` or `setup-codex.ps1`; there is no global installer.
+- Resolve paths from the root containing `.classroom-project.json`.
+- Use this project's `.venv` through `journal` / `journal.cmd`.
+- Proceed only after the current receipt is `FULL_QA_READY_SKILL_PENDING`.
+- The readiness gate must include LibreOffice, Poppler and a successful synthetic `PPTX → PDF → preview` render; there is no PPTX-only success mode.
+- Actually read the complete skill, then request the user's PDF.
+- With a readable PDF, report title and page count, execute the full 40–55-slide workflow, run spec/final QA, render to PDF and inspect previews.
+- Save final PPTX/PDF in `outputs/`; keep specs, assets and QA in `.skill-work/<run-id>/`.
+- Never weaken QA, invent clinical findings, or publish papers, decks, patient information or credentials.

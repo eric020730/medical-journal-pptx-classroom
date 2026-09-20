@@ -1,153 +1,35 @@
-# 疑難排解
+# 自動流程遇到問題
 
-## Codex 沒有看到 skill
+本文件給協助學生的 Codex／教師使用。唯一入口仍是 [CODEX-START.md](../CODEX-START.md)，從失敗階段接續。
 
-確認你打開的是 repository 根目錄，裡面應同時看得到：
+| 卡住的位置 | Codex 應採取的下一步 |
+| --- | --- |
+| 只有一般聊天或遠端 Cloud | 引導學生使用支援 Local workspace 的 Codex；不能宣稱已安裝到學生電腦。 |
+| 工作資料夾已有其他內容 | 不清空、不覆蓋；辨識同一版本或改用新的空白資料夾。 |
+| 下載、TLS、雜湊或防毒阻擋 | 說明哪一項失敗及最小必要批准；不關閉防毒、不忽略驗證、不繞過機構政策。 |
+| 磁碟空間不足 | 清出足夠空間後從 setup 接續；LibreOffice、Poppler、Python 與 cache 需要額外空間。 |
+| `.venv` 損壞或版本不相容 | 保留現況，說明後再取得刪除／重建授權。 |
+| `setup.lock` 已存在 | 確認是否仍有安裝程序；不可盲目刪鎖或同時執行兩次。 |
+| LibreOffice／Poppler 安裝或版本檢查失敗 | 停在 `SETUP_BLOCKED`；不得降級為 PPTX-only。檢查網路、架構、磁碟與機構政策後重跑同一 setup。 |
+| 合成 PPTX 可建檔但 render 失敗 | 視為完整環境未通過；查看 LibreOffice/Poppler 階段，修復後重跑，不要求學生先交論文。 |
+| skill 選單未出現 | 直接讀取完整 repository `SKILL.md`；檔案存在不能代替模型讀取。 |
+| PDF 附件沒有本機路徑 | 指出本專案 `sample-papers` 完整位置，請學生放入；不得猜測掛載路徑。 |
+| 多篇、加密、錯篇、缺頁或病人個資 | 暫停，只問解除阻礙所需的一個問題。 |
+| 額度不足或工作中斷 | 保留 `.skill-work` 與輸出，恢復後接續，不重新安裝或重做已完成階段。 |
+| spec/final/render QA 失敗 | 修正規格或素材，再跑原 gate；不得修改檢查標準取得通過。 |
 
-```text
-README.md
-setup-macos.command
-setup-windows.cmd
-.agents/skills/medical-journal-to-pptx-classroom/SKILL.md
-```
+## 安裝與驗證
 
-接著重新開啟任務或重新啟動 Codex。輸入：
+由 Codex 在專案根目錄執行 `bash setup-codex.sh` 或 `.\setup-codex.ps1`。完整成功條件是：
 
-```text
-$medical-journal-to-pptx-classroom
-```
+- Python 與必要套件通過
+- 固定版本 LibreOffice、Poppler 通過
+- 合成 smoke-test 通過
+- 合成 PPTX 實際轉成 PDF
+- slide preview/contact sheet 實際產生
 
-免費帳號的 Skills 權限以實際帳號為準。無法使用選單時，可嘗試要求 Codex 直接讀取 repository 內的 `SKILL.md`。
+只有 `.skill-work/codex-setup.json` 顯示 `FULL_QA_READY_SKILL_PENDING`，Codex 才能讀 skill 並要求論文。舊 receipt 不能取代本次命令。
 
-## 顯示 Python 3.14 不支援
+## 隱私
 
-專案驗證版本是 Python 3.11–3.13，建議使用 Python 3.12。
-
-macOS：
-
-```bash
-brew install python@3.12
-./setup-macos.command
-```
-
-Windows：
-
-```powershell
-winget install --id Python.Python.3.12 --exact --source winget
-.\setup-windows.cmd
-```
-
-如果已經建立錯誤版本的 `.venv`，確認不再需要其中資料後刪除 `.venv`，再重新執行安裝。
-
-## Windows 找不到 winget
-
-請安裝或更新 Microsoft App Installer。受學校或醫院管理的電腦，應由管理員提供 Python、LibreOffice 和 Poppler。
-
-若這些系統工具已經安裝，只需要建立 Python 環境：
-
-```powershell
-.\setup-windows.ps1 -SkipSystem
-```
-
-## Windows PowerShell 被學校政策禁止
-
-請遵守機構安全規範，交由資訊人員執行 `setup-windows.ps1` 或手動安裝依賴。不要用未知來源的腳本、停用防毒，或繞過組織管理政策。
-
-## macOS 找不到 Homebrew
-
-一般情況直接重新執行：
-
-```bash
-./setup-macos.command
-```
-
-如果管理員已經先安裝好 Python：
-
-```bash
-./setup-macos.command --skip-system
-```
-
-## macOS 安裝檔顯示 Permission denied
-
-下載 ZIP 後，有些解壓縮程式會移除 Unix 可執行權限。先確認專案來源可信，再從專案資料夾執行：
-
-```bash
-bash setup-macos.command
-```
-
-不需要關閉 Gatekeeper，也不要執行來源不明的安裝指令。
-
-## 找不到 LibreOffice 或 soffice
-
-PowerPoint 仍然可以產生；缺少的是 PDF 匯出與部分視覺 QA。
-
-macOS：
-
-```bash
-brew install --cask libreoffice
-./journal doctor --strict
-```
-
-Windows：
-
-```powershell
-winget install --id TheDocumentFoundation.LibreOffice --exact --source winget
-.\journal.cmd doctor --strict
-```
-
-安裝後若 Codex 還是看不到工具，完全關閉並重新開啟 Codex。
-
-## 找不到 Poppler 或 pdftoppm
-
-macOS：
-
-```bash
-brew install poppler
-```
-
-Windows：
-
-```powershell
-winget install --id oschwartz10612.Poppler --exact --source winget
-```
-
-專案會自動檢查常見 WinGet 安裝位置。缺少 Poppler 時，PowerPoint 仍可產生；PDF 預覽也會嘗試以 PyMuPDF 替代。
-
-## PPTX 有了，但沒有 PDF
-
-手動執行：
-
-```bash
-./journal render "outputs/你的簡報.pptx" --preview
-```
-
-Windows：
-
-```powershell
-.\journal.cmd render "outputs\你的簡報.pptx" --preview
-```
-
-## 額度不足，中途停止
-
-等待帳號額度恢復後，回到同一個 Codex 任務：
-
-```text
-請從目前 .skill-work 內已經完成的階段繼續，保留已擷取的圖表，
-完成剩餘投影片、繁體中文備註與 QA，不要重新開始完整工作。
-```
-
-## 環境報告
-
-macOS：
-
-```bash
-./journal doctor --json > diagnostics.json
-```
-
-Windows：
-
-```powershell
-.\journal.cmd doctor --json > diagnostics.json
-```
-
-`diagnostics.json` 可能包含使用者名稱與電腦路徑，傳給老師或公開貼文前請先遮蔽個人資訊。
+回報教師的是失敗階段與去識別摘要，不是完整路徑、原始日誌、論文全文或帳密。不要把 PDF、PPTX、`.bootstrap`、`.venv` 或 `.skill-work` 提交到 GitHub。

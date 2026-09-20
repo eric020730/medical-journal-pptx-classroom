@@ -5,9 +5,13 @@ set "PROJECT_ROOT=%~dp0"
 set "PROJECT_PYTHON=%PROJECT_ROOT%.venv\Scripts\python.exe"
 
 if not exist "%PROJECT_PYTHON%" (
-  echo Project Python environment is missing. Run setup-windows.cmd first. 1>&2
+  echo Project Python environment is missing. Ask Codex to follow CODEX-START.md using setup-codex.ps1. 1>&2
   exit /b 1
 )
 
+set "PIXI_HOME=%PROJECT_ROOT%.bootstrap\pixi-home"
+set "PIXI_CACHE_DIR=%PROJECT_ROOT%.bootstrap\pixi-cache"
+set "PIXI_NO_PATH_UPDATE=1"
+set "PATH=%PROJECT_ROOT%.bootstrap\pixi-home\bin;%PROJECT_ROOT%.bootstrap\libreoffice\program;%PATH%"
 "%PROJECT_PYTHON%" "%PROJECT_ROOT%tools\classroom.py" %*
 exit /b %ERRORLEVEL%

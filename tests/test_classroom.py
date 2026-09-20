@@ -72,10 +72,10 @@ class ClassroomProjectTests(unittest.TestCase):
 
     def test_release_preserves_macos_launchers_when_packaged_on_windows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            launcher = Path(temporary) / "setup-macos.command"
+            launcher = Path(temporary) / "setup-codex.sh"
             launcher.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
             launcher.chmod(0o644)
-            info = package_release._zip_info("project/setup-macos.command", launcher)
+            info = package_release._zip_info("project/setup-codex.sh", launcher)
             mode = (info.external_attr >> 16) & 0o777
             self.assertEqual(mode & 0o111, 0o111)
 
@@ -107,7 +107,9 @@ class ClassroomProjectTests(unittest.TestCase):
                 in {
                     ".git",
                     ".venv",
+                    ".bootstrap",
                     ".skill-work",
+                    "outputs",  # Private generated PPTX files are not packaged text.
                     ".ruff_cache",
                     ".pytest_cache",
                     "__pycache__",

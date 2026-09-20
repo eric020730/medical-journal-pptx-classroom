@@ -746,7 +746,9 @@ preserves the journal's exact layout:
 ```bash
 python3 scripts/postprocess_assets.py vector-table \
   <source.pdf> final_assets/Table_1.emf \
-  --page 4 --bbox 48.7,495.1,540.9,740.6 --pad-top 16 --pad-bottom 24
+  --page <page> --bbox <reviewed-x0,y0,x1,y1> --pad-top 16 --pad-bottom 24 \
+  --expected-text "<table title>" --expected-text "<column heading>" \
+  --expected-text "<last row>" --expected-text "<footnote>"
 ```
 
 Use the table bbox (PDF points) from `extracted/manifest.json`. The command
@@ -759,9 +761,10 @@ prints the `image_aspect`; put both in the deck spec:
 
 `build_deck.py` detects the `.emf` extension and places it on a white card on
 the dark slide (vector tables have no white background of their own). EMF assets
-bypass the PNG postprocess/audit gates by design. For stacked tables on one page
-(e.g. Table 2 above Table 3), use small `--pad-top`/`--pad-bottom` so a table
-does not capture its neighbour. The raster path (`--table-dpi`, default 600)
+require source validation, provenance and individual visual comparison just like
+raster tables. Padding adds blank canvas after cropping and never expands the
+source region. See `article_level_crop_design.md` for acceptance requirements.
+The raster path (`--table-dpi`, default 600)
 remains available when a vector route is not wanted.
 
 Before building the deck, audit final assets:

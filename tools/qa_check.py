@@ -410,6 +410,52 @@ def validate_specification(
     }
 
 
+def check_native_panels(presentation, spec, spec_path):
+    """Use the reviewed source inventory, not optional builder label fields."""
+    failures = []
+    plan_value = spec.get('meta', {}).get('panel_crop_plan')
+    inventory = {}
+    if plan_value:
+        plan = json.loads(resolve_asset(plan_value, spec_path).read_text())
+        inventory = {a['id']: a['expected_labels'] for a in plan['assets']
+                     if a.get('export_image_panels')}
+    seen = set()
+    for index, (slide, sp) in enumerate(zip(presentation.slides, spec['slides']), 1):
+        if sp.get('type') != 'figure':
+            continue
+        match = FIGURE_RE.search(sp.get('caption', ''))
+        key = 'Figure_' + match[1] if match else ''
+        meta = read_sidecar(resolve_asset(sp['image'], spec_path)) or {}
+        labels = inventory.get(key) or (meta.get('labels') if meta.get('native_labels') else [])
+        if not labels:
+            continue
+        seen.add(key)
+        geometry = meta.get('geometry', [])
+        pictures = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE]
+        pic = max(pictures, key=lambda s: s.width*s.height) if pictures else None
+        if [g.get('label') for g in geometry] != labels or pic is None:
+            failures.append(f'Slide {index}: missing native panel geometry for {key}')
+            continue
+        for label, g in zip(labels, geometry):
+            found = [s for s in slide.shapes if s.has_text_frame and s.text.strip() == label]
+            if len(found) != 1:
+                failures.append(f'Slide {index}: expected exactly one native {label}; found {len(found)}')
+                continue
+            tb = found[0]
+            runs = [r for p in tb.text_frame.paragraphs for r in p.runs if r.text.strip()]
+            try:
+                valid = len(runs) == 1 and runs[0].font.size.pt == 18 and str(runs[0].font.color.rgb) == '8FA8C8'
+            except (AttributeError, TypeError):
+                valid = False
+            expected_right = pic.left + g['fx_right']*pic.width - 0.05*914400
+            expected_center = pic.top + g['fy_center']*pic.height
+            if not valid or abs(tb.left+tb.width-expected_right)>0.02*914400 or abs(tb.top+tb.height/2-expected_center)>0.02*914400:
+                failures.append(f'Slide {index}: wrong style/position for native {label}')
+    for key in inventory.keys() - seen:
+        failures.append(f'Missing source-inventory figure: {key}')
+    return failures
+
+
 def logo_hash() -> str | None:
     if not LOGO_PATH.is_file():
         return None
@@ -475,6 +521,11 @@ def validate_presentation(
                     f"but the PowerPoint contains {count}."
                 )
 
+    if spec_path is not None and spec_slides:
+        try:
+            failures.extend(check_native_panels(presentation, json.loads(spec_path.read_text()), spec_path))
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            failures.append(f'Native panel QA could not complete: {error}')
     expected_logo = logo_hash()
     if expected_logo is None:
         failures.append(f"Bundled presentation logo is missing: {LOGO_PATH}")
