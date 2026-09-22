@@ -138,3 +138,56 @@ must remain unresolved and cannot authorize a native label.
 
 If confidence is low, do not silently choose. Use a manual full-page-render crop
 and record the decision in `crop_overrides.json`.
+
+## Caption-bound table crops omitted by extraction
+
+Do not modify an extraction manifest to insert missed tables. A v1 article asset
+map may instead bind a table to an authenticated reviewed crop plan. Keep the
+map's existing PDF and extraction-manifest hashes and `caption_evidence` fields.
+Use exactly one source binding for this route (no mixed manifest/crop bindings):
+
+```json
+{
+  "asset_id": "table:2",
+  "kind": "table",
+  "number": 2,
+  "source_bindings": [{
+    "type": "reviewed-pdf-crop-plan-v1",
+    "plan": "source-crop-plan.json",
+    "plan_sha256": "<SHA-256 of exact reviewed plan file bytes>",
+    "asset_id": "table2",
+    "page": 1,
+    "bbox_pt": [230, 10, 435, 195],
+    "header_bbox_pt": [230, 10, 435, 70]
+  }],
+  "association": {
+    "method": "caption-in-reviewed-table-header-v1",
+    "review_note": "Title, column headers, last row and footnote compared with the PDF."
+  }
+}
+```
+
+This fragment omits `caption_evidence` for brevity; that evidence remains
+mandatory, including its exact PDF text, normalized-text hash, page, and bbox.
+Resolve `plan` relative to the map; resolve the plan's `pdf` relative to the
+plan file. The selected plan asset must be a table with matching ID, page,
+bbox, source PDF/hash, DPI, and nonempty expected-text anchors. Its ID need not
+encode the article number: the replayed caption establishes the article number.
+
+The logical header must start at the crop's top edge, span its full width,
+contain the complete caption bbox, and begin with the authenticated caption
+text. For a natively split plan, it must lie within the repeated header.
+This logical region does not crop or truncate a vector table frame. The full
+crop still undergoes the source-crop text/image/vector clipping checks. Crops
+containing references to a different numbered table fail closed and require a
+more precise reviewed crop; a whole-page/PDF hash is never table identity.
+
+Final raster provenance must reach the exact selected crop asset object and
+renderer settings. Helper-generated splits and composites may share that root;
+branches from another table or from a manifest page/image fail. The existing
+source-crop v1 sidecar embeds the asset object, so no sidecar rewriting or new
+manifest entries are needed. Changes to the plan file invalidate the map hash;
+updating that hash does not authorize stale crops with different embedded asset
+parameters. QA receipts traverse these nested plan references and the plan's
+source PDF, so either dependency changing invalidates receipt reuse. Existing
+manifest-based figure/table bindings retain their original route and checks.

@@ -24,6 +24,8 @@ SCHEMA = "medical-journal-article-asset-map/v1"
 EXTRACTION_SCHEMA = "medical-journal-extraction-manifest/v1"
 NORMALIZER = "caption-nfkc-whitespace-v1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+CROP_BINDING = "reviewed-pdf-crop-plan-v1"
+CROP_ASSOCIATION = "caption-in-reviewed-table-header-v1"
 ASSET_ID_RE = re.compile(r"^(figure|table):([1-9][0-9]*)$", re.IGNORECASE)
 
 
@@ -118,6 +120,79 @@ def map_path_from_spec(spec_path: Path, specification: dict[str, Any]) -> Path |
     return _resolved(value, spec_path.parent)
 
 
+def _reviewed_table_crop(binding, *, base, source_pdf, source_hash,
+                         document, caption_page, caption_box, caption_text, number):
+    """Authenticate a reviewed table independently of extraction detection.
+
+    A PDF/page hash is not table identity. Bind the reviewed asset object and
+    renderer settings, and replay the table title inside its own top header.
+    """
+    from source_crops import region
+
+    if not isinstance(binding.get("plan"), str) or not binding["plan"].strip():
+        raise ValueError("reviewed crop requires a plan path")
+    plan_path = _resolved(binding["plan"], base)
+    if (not isinstance(binding.get("plan_sha256"), str)
+            or SHA256_RE.fullmatch(binding["plan_sha256"]) is None
+            or sha256_path(plan_path) != binding["plan_sha256"]):
+        raise ValueError("reviewed crop plan SHA-256 differs from the reviewed binding")
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    if (not isinstance(plan, dict) or not isinstance(plan.get("pdf"), str)
+            or _resolved(plan["pdf"], plan_path.parent) != source_pdf
+            or plan.get("source_sha256") != source_hash):
+        raise ValueError("reviewed crop plan must use the authenticated source PDF/hash")
+    assets = plan.get("assets")
+    expected = plan.get("expected_assets")
+    if (not isinstance(assets, list) or not assets
+            or not all(isinstance(a, dict) and isinstance(a.get("id"), str) for a in assets)):
+        raise ValueError("reviewed crop plan has malformed asset inventory")
+    ids = [a["id"] for a in assets]
+    if (len(ids) != len(set(ids)) or not isinstance(expected, list)
+            or not all(isinstance(a, str) for a in expected) or sorted(ids) != sorted(expected)):
+        raise ValueError("reviewed crop plan asset inventory is duplicate or incomplete")
+    selected = [a for a in assets if a["id"] == binding.get("asset_id")]
+    if len(selected) != 1 or selected[0].get("type") != "table":
+        raise ValueError("reviewed crop binding must select exactly one table plan asset")
+    asset = selected[0]
+    page_number = binding.get("page")
+    if (type(page_number) is not int or page_number != asset.get("page")
+            or page_number != caption_page or document is None
+            or not 1 <= page_number <= len(document)):
+        raise ValueError("reviewed crop page differs from the table/caption page")
+    bbox = _bbox(binding.get("bbox_pt"))
+    header = _bbox(binding.get("header_bbox_pt"))
+    if bbox is None or bbox != _bbox(asset.get("bbox")) or header is None:
+        raise ValueError("reviewed crop bbox differs from plan or header bbox is invalid")
+    if (not pymupdf.Rect(bbox).contains(pymupdf.Rect(header))
+            or header[:3] != bbox[:3]
+            or caption_box is None or not pymupdf.Rect(header).contains(pymupdf.Rect(caption_box))):
+        raise ValueError("caption must lie inside the full-width top header of the reviewed crop")
+    if asset.get("splits") and header[3] > asset.get("header_bottom", float('-inf')):
+        raise ValueError("caption header exceeds the repeated split-table header")
+    anchors = asset.get("expected_text")
+    if not isinstance(anchors, list) or not anchors:
+        raise ValueError("reviewed table crop requires nonempty text anchors")
+    page = document[page_number - 1]
+    region(page, list(bbox), anchors)
+    # Read in page coordinates, not PDF object order. The header must begin
+    # with the replayed caption, not a body-text mention of another table.
+    header_text = normalize_caption(page.get_text("text", clip=pymupdf.Rect(header), sort=True))
+    if not caption_text or not header_text.startswith(caption_text):
+        raise ValueError("reviewed table header must begin with the authenticated caption")
+    crop_text = page.get_text("text", clip=pymupdf.Rect(bbox), sort=True)
+    labels = re.findall(r"(?i)\btable\s+([1-9][0-9]*)\b", crop_text)
+    if not labels or set(labels) != {number}:
+        raise ValueError("reviewed crop contains another table title or no table title")
+    dpi = plan.get("dpi", 300)
+    if (isinstance(dpi, bool) or not isinstance(dpi, (int, float))
+            or not math.isfinite(dpi) or not 72 <= dpi <= 600):
+        raise ValueError("reviewed crop plan dpi must be finite within 72..600")
+    return {"plan_path": plan_path, "plan_sha256": binding["plan_sha256"],
+            "asset_id": asset["id"], "asset": asset, "page": page_number,
+            "bbox_pt": list(bbox), "dpi": dpi, "source_pdf": source_pdf,
+            "source_sha256": source_hash}
+
+
 def validate_map(map_path: Path) -> dict[str, Any]:
     """Return validated map context and fail closed on stale caption/source evidence."""
     map_path = map_path.expanduser().resolve()
@@ -162,6 +237,9 @@ def validate_map(map_path: Path) -> dict[str, Any]:
         failures.append(
             "Article asset map extraction_manifest_sha256 does not match the manifest."
         )
+    if not isinstance(manifest, dict):
+        failures.append("Article asset map extraction manifest must be an object.")
+        manifest = {}
     if manifest.get("schema") != EXTRACTION_SCHEMA:
         failures.append("Article asset map references an unsupported extraction manifest.")
     if source_hash and manifest.get("pdf_sha256") != source_hash:
@@ -250,11 +328,32 @@ def validate_map(map_path: Path) -> dict[str, Any]:
         if not isinstance(bindings, list) or not bindings:
             failures.append(f"{prefix} requires source_bindings.")
             bindings = []
+        resolved_crop_bindings: list[dict[str, Any]] = []
+        crop_bindings_declared = False
         resolved_bindings: list[Path] = []
         bound_names: list[str] = []
         for binding_index, binding in enumerate(bindings, start=1):
             if not isinstance(binding, dict):
                 failures.append(f"{prefix} source binding {binding_index} must be an object.")
+                continue
+            if binding.get("type") == CROP_BINDING:
+                crop_bindings_declared = True
+                if kind != "table" or len(bindings) != 1:
+                    failures.append(f"{prefix} reviewed crop requires exactly one table binding; no mixed roots.")
+                    continue
+                if any(key in binding for key in ("manifest_collection", "manifest_file")):
+                    failures.append(f"{prefix} reviewed crop cannot also declare a manifest root.")
+                try:
+                    resolved_crop_bindings.append(_reviewed_table_crop(
+                        binding, base=map_path.parent, source_pdf=source_pdf,
+                        source_hash=source_hash, document=document, caption_page=page,
+                        caption_box=caption_box, caption_text=actual_caption, number=number,
+                    ))
+                except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+                    failures.append(f"{prefix} reviewed crop binding is invalid: {error}.")
+                continue
+            if "type" in binding:
+                failures.append(f"{prefix} unsupported source binding type {binding.get('type')!r}.")
                 continue
             collection = binding.get("manifest_collection")
             name = binding.get("manifest_file")
@@ -289,7 +388,13 @@ def validate_map(map_path: Path) -> dict[str, Any]:
             "nearest-preceding-x-overlap-v1",
             "nearest-following-x-overlap-v1",
         }
-        if method in deterministic_methods:
+        if crop_bindings_declared:
+            note = association.get("review_note") if isinstance(association, dict) else None
+            if method != CROP_ASSOCIATION:
+                failures.append(f"{prefix} reviewed crop requires association {CROP_ASSOCIATION}.")
+            if not isinstance(note, str) or len(note.strip()) < 16:
+                failures.append(f"{prefix} reviewed crop requires a substantive review_note.")
+        elif method in deterministic_methods:
             collection = "figures" if kind == "figure" else "tables"
             selected = (
                 _nearest_spatial_binding(manifest, collection, page, caption_box, method)
@@ -319,6 +424,7 @@ def validate_map(map_path: Path) -> dict[str, Any]:
             **entry,
             "asset_id": canonical_id,
             "resolved_source_bindings": resolved_bindings,
+            "resolved_crop_bindings": resolved_crop_bindings,
         }
 
     if document is not None:

@@ -633,6 +633,8 @@ def _provenance_paths(
     active: tuple[Path, ...] | None = None,
     validated: set[Path] | None = None,
     crop_audit: dict[str, Any] | None = None,
+    crop_roots: list[dict[str, Any]] | None = None,
+    manifest_roots: set[Path] | None = None,
 ) -> tuple[list[Path], list[str]]:
     """Return the complete provenance graph and fail closed on unsafe terminals.
 
@@ -679,6 +681,10 @@ def _provenance_paths(
                 paths.extend(matched)
         if not pages:
             failures.append(f"Source crop {asset.name} has no authenticated pages.")
+        if crop_roots is not None:
+            crop_roots.append({"asset": asset, "plan": plan, "dpi": sidecar.get("dpi"),
+                               "source": _resolve_path(source, asset.parent) if isinstance(source, str) else None,
+                               "source_sha256": sidecar.get("source_sha256")})
         return list(dict.fromkeys(paths)), failures
     values: list[str] = []
     source = sidecar.get("source")
@@ -727,6 +733,8 @@ def _provenance_paths(
                 )
             continue
         if path in trusted:
+            if manifest_roots is not None:
+                manifest_roots.add(path)
             validated.add(path)
             continue
         if path in validated:
@@ -754,6 +762,8 @@ def _provenance_paths(
                 active=(*active, path),
                 validated=validated,
                 crop_audit=crop_audit,
+                crop_roots=crop_roots,
+                manifest_roots=manifest_roots,
             )
             paths.extend(nested)
             failures.extend(errors)
@@ -1449,6 +1459,11 @@ def _deterministic_helper_evidence(asset: Path, sidecar: dict[str, Any]) -> tupl
                         return True, [
                             f"Asset {asset.name} compositor replay did not produce a readable sidecar."
                         ]
+                    if sidecar.get("layout_template") == "source-native":
+                        if (sidecar.get("source_native_layout") != replay_sidecar.get("source_native_layout")
+                                or sidecar.get("panel_boxes_px") != replay_sidecar.get("panel_boxes_px")
+                                or sidecar.get("native_labels") is not False):
+                            return True, [f"Asset {asset.name} source-native layout binding is missing, changed, or stale."]
                     recorded_topology = sidecar.get("source_seam_topology")
                     replayed_topology = replay_sidecar.get("source_seam_topology")
                     if recorded_topology != replayed_topology:
@@ -1716,6 +1731,11 @@ def audit_final_assets(spec_path: Path, report: dict[str, Any]) -> dict[str, Any
                                 f"source_asset_id is {source_asset_id}."
                             )
         if suffix in vector_table.VECTOR_SUFFIXES:
+            if mapped_entry is not None and mapped_entry.get("resolved_crop_bindings"):
+                failures.append(
+                    f"Slide {index}: reviewed crop binding requires a source-coordinate-crop "
+                    "raster provenance root; a direct vector PDF crop is not that plan asset."
+                )
             source_pdf = report.get("source_pdf")
             source_pdf_sha256 = report.get("source_pdf_sha256")
             if report.get("ok") is not True:
@@ -1765,6 +1785,8 @@ def audit_final_assets(spec_path: Path, report: dict[str, Any]) -> dict[str, Any
             flowchart_failures = _flowchart_evidence(sidecar, asset, report)
             failures.extend(f"Slide {index}: {failure}" for failure in flowchart_failures)
             allow_direct_pdf = not flowchart_failures
+        crop_roots: list[dict[str, Any]] = []
+        manifest_roots: set[Path] = set()
         provenance, provenance_failures = _provenance_paths(
             sidecar,
             asset,
@@ -1773,18 +1795,42 @@ def audit_final_assets(spec_path: Path, report: dict[str, Any]) -> dict[str, Any
             trusted_documents=trusted_documents,
             allow_document_terminal=allow_direct_pdf,
             crop_audit=report,
+            crop_roots=crop_roots,
+            manifest_roots=manifest_roots,
         )
         failures.extend(f"Slide {index}: {failure}" for failure in provenance_failures)
         if mapped_entry is not None:
-            expected_terminals = set(mapped_entry.get("resolved_source_bindings", []))
-            actual_terminals = {path for path in provenance if path in trusted}
-            if actual_terminals != expected_terminals:
-                expected_names = ", ".join(sorted(path.name for path in expected_terminals))
-                actual_names = ", ".join(sorted(path.name for path in actual_terminals))
-                failures.append(
-                    f"Slide {index}: {mapped_entry['asset_id']} provenance terminates at "
-                    f"[{actual_names}], expected caption-bound source [{expected_names}]."
-                )
+            expected_crops = mapped_entry.get("resolved_crop_bindings", [])
+            if expected_crops:
+                expected = expected_crops[0]
+                # Page render terminals authenticate source bytes, but must never
+                # substitute for table identity. Every branch must descend from
+                # the exact reviewed crop asset; mixed raw page/manifest inputs
+                # and same-page tables are not interchangeable.
+                matches = (len(expected_crops) == 1 and bool(crop_roots)
+                           and not manifest_roots and all(
+                    root["plan"] == expected["asset"]
+                    and root["plan"].get("id") == expected["asset_id"]
+                    and root["dpi"] == expected["dpi"]
+                    and root["source"] == expected["source_pdf"]
+                    and root["source_sha256"] == expected["source_sha256"]
+                    for root in crop_roots
+                ))
+                if not matches:
+                    failures.append(
+                        f"Slide {index}: {mapped_entry['asset_id']} provenance does not match "
+                        "the exact caption-bound reviewed crop plan asset; wrong or mixed source roots."
+                    )
+            else:
+                expected_terminals = set(mapped_entry.get("resolved_source_bindings", []))
+                actual_terminals = {path for path in provenance if path in trusted}
+                if crop_roots or actual_terminals != expected_terminals:
+                    expected_names = ", ".join(sorted(path.name for path in expected_terminals))
+                    actual_names = ", ".join(sorted(path.name for path in actual_terminals))
+                    failures.append(
+                        f"Slide {index}: {mapped_entry['asset_id']} provenance terminates at "
+                        f"[{actual_names}], expected caption-bound source [{expected_names}]."
+                    )
 
         # Unsafe raw streams must be rejected for every asset type, including
         # tables and flowcharts, before any correlation exemptions are applied.

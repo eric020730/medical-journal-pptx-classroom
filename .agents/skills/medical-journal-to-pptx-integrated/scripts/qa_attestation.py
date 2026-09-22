@@ -127,6 +127,21 @@ def dependency_digest(spec: Path) -> str:
                 "extraction_manifest": "manifest", "extracted_manifest": "manifest",
                 "source_crop_plan": "plan", "panel_crop_plan": "plan",
             })
+        if kind == "map":
+            assets = data.get("assets", [])
+            if not isinstance(assets, list):
+                raise ValueError("Article map assets must be a list.")
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    raise ValueError("Article map asset must be an object.")
+                bindings = asset.get("source_bindings", [])
+                if not isinstance(bindings, list):
+                    raise ValueError("Article map source_bindings must be a list.")
+                for binding in bindings:
+                    if not isinstance(binding, dict):
+                        raise ValueError("Article map source binding must be an object.")
+                    if binding.get("type") == "reviewed-pdf-crop-plan-v1":
+                        reference(binding.get("plan"), path.parent, "plan")
         if kind == "seam":
             fields(data, path.parent, {"source": "asset", "overlay": "file"})
         if kind == "sidecar":

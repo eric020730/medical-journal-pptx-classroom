@@ -30,10 +30,12 @@ watcher or a badge inside PowerPoint. Moving unchanged files together is safe.
 
 This is an unsigned local integrity record, not a digital signature, proof
 against deliberate tampering, or certification of clinical accuracy. The quick
-status command does not reopen external source PDFs, images, provenance
-sidecars, or repeat visual review. If those inputs or the runtime dependencies
-change, run full QA even if the receipt is current. The raw spec hash is
-conservative: even formatting-only JSON changes require QA again.
+status command hashes the declared source dependency graph, including source
+PDFs, extracted images, provenance sidecars, crop plans, seam evidence, the
+article map, and the logo. A changed dependency invalidates the receipt. It
+does not repeat semantic validation, crop replay, or visual review. If runtime
+dependencies change, run full QA again. The raw spec hash is conservative:
+even formatting-only JSON changes require QA again.
 
 The builder embeds a deterministic manifest in the PowerPoint: skill version,
 selected style, exact presentation canvas dimensions, canonical specification

@@ -1018,6 +1018,86 @@ def resolve_source_labels(images, metadata, requested_policy):
     return cleaned, policy, decisions, modes, details
 
 
+def authenticate_source_native_inputs(paths, panels, metadata):
+    """Require exact, same-source panel crops and existing deterministic seam QA."""
+    from image_polarity import _deterministic_helper_evidence
+
+    if len(paths) < 2:
+        raise ValueError("source-native requires at least two authenticated panel crops")
+    crops = [_panel_source_crop(entry) for entry in metadata]
+    if any(crop is None for crop in crops) or len({crop[0] for crop in crops}) != 1:
+        raise ValueError("source-native requires panel-crop sidecars from the same source")
+    for path, panel, entry in zip(paths, panels, metadata):
+        if label_details(entry, panel)["placement"] not in {"embedded", "overlay", "overlap"}:
+            raise ValueError("source-native requires explicitly preserved embedded source labels")
+        handled, failures = _deterministic_helper_evidence(Path(path), entry)
+        if not handled or failures:
+            raise ValueError("source-native panel authentication failed: " + "; ".join(failures))
+    for index, (_, first) in enumerate(crops):
+        for _, second in crops[index + 1:]:
+            if min(first[2], second[2]) > max(first[0], second[0]) and min(first[3], second[3]) > max(first[1], second[1]):
+                raise ValueError("source-native panel crops must not overlap or duplicate source pixels")
+
+
+def layout_source_native(panels, metadata, cleanup, adjustments, bg, safety_margin_px,
+                         box_width_in, box_height_in):
+    """Paste exact effective source crops at 1:1 scale; never resize clinical pixels.
+
+    Rim cleanup advances each panel's source origin by exactly its removed pixels.
+    The union is computed after cleanup, retaining all source-relative interior
+    distances without adding an exterior clinical-image safety canvas.
+    """
+    source = resolved_source_path(metadata[0])
+    with Image.open(source) as opened:
+        source_image = opened.convert("RGB")
+    boxes = []
+    for panel, entry, cleaning, changes in zip(panels, metadata, cleanup, adjustments):
+        box = list(changes[-1]["effective_crop_box_px"] if changes else entry["crop_box_px"])
+        trims = cleaning["total_edge_trim_px"]
+        effective = [box[0] + trims["left"], box[1] + trims["top"],
+                     box[2] - trims["right"], box[3] - trims["bottom"]]
+        if not (0 <= effective[0] < effective[2] <= source_image.width and
+                0 <= effective[1] < effective[3] <= source_image.height):
+            raise ValueError("source-native effective crop is outside the source")
+        exact = source_image.crop(effective)
+        if exact.size != panel.size or exact.tobytes() != panel.convert("RGB").tobytes():
+            raise ValueError("source-native processed panel is not the exact effective source crop")
+        boxes.append(effective)
+    for index, first in enumerate(boxes):
+        for second in boxes[index + 1:]:
+            if min(first[2], second[2]) > max(first[0], second[0]) and min(first[3], second[3]) > max(first[1], second[1]):
+                raise ValueError("source-native effective panel crops overlap")
+    union = [min(b[0] for b in boxes), min(b[1] for b in boxes),
+             max(b[2] for b in boxes), max(b[3] for b in boxes)]
+    width, height = union[2] - union[0], union[3] - union[1]
+    comp = Image.new("RGB", (width + 2*safety_margin_px, height + 2*safety_margin_px), bg)
+    rects = []
+    for panel, box in zip(panels, boxes):
+        x, y = box[0] - union[0] + safety_margin_px, box[1] - union[1] + safety_margin_px
+        comp.paste(panel, (x, y))
+        rects.append({"x": x, "y": y, "w": panel.width, "h": panel.height})
+    fit = min(box_width_in / comp.width, box_height_in / comp.height)
+    areas = [p.width * p.height * fit**2 for p in panels]
+    # Rows/columns are descriptive only; no grid, spanning, or equalization is applied.
+    rows = len({box[1] for box in boxes})
+    cols = max(sum(box[1] == y for box in boxes) for y in {box[1] for box in boxes})
+    selected = {"cols": cols, "rows": rows, "band_px": 0, "gutter_px": None,
+                "composite_width_px": comp.width, "composite_height_px": comp.height,
+                "unpadded_width_px": width, "unpadded_height_px": height,
+                "safety_margin_px": safety_margin_px, "fit_in_per_px": fit,
+                "min_panel_area_sq_in": min(areas), "total_panel_area_sq_in": sum(areas),
+                "min_panel_short_edge_in": min(min(p.size)*fit for p in panels),
+                "utilization_fraction": sum(areas)/(box_width_in*box_height_in),
+                "empty_cells": 0, "displayed_panel_sizes_in": [
+                    {"width": p.width*fit, "height": p.height*fit} for p in panels],
+                "layout_template": "source-native"}
+    binding = {"schema": "medical-journal-source-native-layout/v1",
+               "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+               "source_size_px": list(source_image.size), "union_box_px": union,
+               "effective_crop_boxes_px": boxes, "scale": 1}
+    return comp, rects, selected, binding
+
+
 def layout_dimensions(panels, cols, band, gap):
     """Calculate exact row geometry without repeatedly rendering candidate grids."""
     rows = [panels[i:i + cols] for i in range(0, len(panels), cols)]
@@ -1465,10 +1545,10 @@ def main():
                     help="manual column count; omit to choose the most readable grid")
     ap.add_argument(
         "--layout-template",
-        choices=("grid", "left-span-2x2", "right-span-2x2", "two-span-right-stack"),
+        choices=("grid", "left-span-2x2", "right-span-2x2", "two-span-right-stack", "source-native"),
         default="grid",
         help="optional reviewed irregular layout; left-span-2x2 requires five panels, "
-             "right-span-2x2 requires five panels, and two-span-right-stack requires four panels",
+             "right-span-2x2 requires five panels; source-native preserves authenticated source positions and scale",
     )
     ap.add_argument("--labels", default="")
     ap.add_argument("--geometry", default="panel_geometry.json")
@@ -1558,7 +1638,7 @@ def main():
         if protected:
             protected_seam_edges[panel_index] = protected
     source_seam_topology = None
-    if a.asset_type == "clinical-image":
+    if a.asset_type == "clinical-image" or a.layout_template == "source-native":
         try:
             source_seam_topology = require_inferred_source_seams(
                 a.inputs, panel_metadata
@@ -1566,6 +1646,11 @@ def main():
         except (OSError, ValueError) as error:
             ap.error(str(error))
     panels = [Image.open(p).convert("RGB") for p in a.inputs]
+    if a.layout_template == "source-native":
+        try:
+            authenticate_source_native_inputs(a.inputs, panels, panel_metadata)
+        except (OSError, ValueError) as error:
+            ap.error(str(error))
     for path, panel, metadata in zip(a.inputs, panels, panel_metadata):
         overwritten = overwritten_source_pixels(panel, metadata)
         if overwritten:
@@ -1624,7 +1709,20 @@ def main():
     band_in = a.gap_above_in + glyph_h + a.gap_below_in if native_labels else 0
     drop_in = a.gap_above_in + a.center_offset_in         # panel bottom -> label box center
 
-    if a.layout_template == "left-span-2x2":
+    source_native_layout = None
+    if a.layout_template == "source-native":
+        if native_labels or any(label_margins) or any(mode != "preserved" for mode in label_modes):
+            ap.error("source-native supports preserved embedded labels only, without native labels")
+        try:
+            comp, rects, selected, source_native_layout = layout_source_native(
+                panels, panel_metadata, cleanup, boundary_adjustments, bg, a.safety_margin_px,
+                a.slide_box_w_in, a.slide_box_h_in,
+            )
+        except (OSError, ValueError) as error:
+            ap.error(str(error))
+        candidates = [selected]
+        cols, band = selected["cols"], 0
+    elif a.layout_template == "left-span-2x2":
         if len(panels) != 5:
             ap.error("left-span-2x2 requires exactly five input panels")
         if native_labels:
@@ -1748,6 +1846,7 @@ def main():
                "source_inputs": [os.path.abspath(path) for path in a.inputs],
                "source_seam_topology": source_seam_topology,
                "panel_boxes_px": rects,
+               "source_native_layout": source_native_layout,
                "layout_mode": ("template" if a.layout_template != "grid" else
                                "manual" if a.cols is not None else "auto"),
                "layout_template": a.layout_template,

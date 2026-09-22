@@ -164,6 +164,38 @@ class DependencyReceiptTests(unittest.TestCase):
         path.write_text(json.dumps(record))
         self.assertEqual(self.status()['status'], 'stale')
 
+    def test_nested_article_crop_plan_and_pdf_mutations_invalidate_receipt(self):
+        pdf = self.write('sources/map-only.pdf', b'%PDF-only-via-map-plan')
+        plan = self.json('plans/map-only.json', {'pdf': '../sources/map-only.pdf', 'assets': []})
+        mapping = json.loads(self.mapping.read_text())
+        mapping['assets'] = [{'asset_id': 'table:2', 'source_bindings': [{
+            'type': 'reviewed-pdf-crop-plan-v1', 'plan': '../plans/map-only.json',
+            'asset_id': 'table2', 'review_note': 'This arbitrary/prose is not a dependency.'}]}]
+        self.mapping.write_text(json.dumps(mapping))
+        self.spec.write_text(json.dumps({'meta': {'article_asset_map': 'maps/article.json'}, 'slides': []}))
+        for path in (plan, pdf):
+            with self.subTest(dependency=path.name):
+                original = path.read_bytes()
+                self.record()
+                self.assertTrue(self.status()['ok'])
+                path.write_bytes(original + b' ')
+                self.assertFalse(self.status()['ok'])
+                path.write_bytes(original)
+        self.record()
+        plan.unlink()
+        self.assertFalse(self.status()['ok'])
+        with self.assertRaisesRegex(ValueError, 'missing or unreadable'):
+            self.record()
+        self.assertEqual(json.loads(qa.receipt_path(self.pptx).read_text())['result'], 'failed')
+
+    def test_nested_article_crop_plan_path_cannot_be_absent_or_malformed(self):
+        for value in (None, '', False, [], {}):
+            with self.subTest(value=value):
+                self.mapping.write_text(json.dumps({'assets': [{'source_bindings': [{
+                    'type': 'reviewed-pdf-crop-plan-v1', 'plan': value}]}]}))
+                with self.assertRaisesRegex(ValueError, 'nonempty path'):
+                    self.record()
+
 
 if __name__ == '__main__':
     unittest.main()
