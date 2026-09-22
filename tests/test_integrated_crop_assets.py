@@ -83,11 +83,13 @@ def compose(out, *extra):
 
 
 class IntegratedCropAssetTests(unittest.TestCase):
-    def case(self, code):
+    def case(self, code, *, requires_render=False):
         program = ('import sys\nfrom pathlib import Path\n'
                    f'SCRIPTS = Path({str(SCRIPTS)!r})\n'
                    'sys.path.insert(0, str(SCRIPTS))\n' + PRELUDE + '\n' + textwrap.dedent(code))
         result = subprocess.run([sys.executable, '-c', program], capture_output=True, text=True)
+        if requires_render and result.returncode == 77:
+            self.skipTest("LibreOffice is absent in this core-only environment")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_table_replay_and_final_safety_contract(self):
@@ -228,6 +230,17 @@ class IntegratedCropAssetTests(unittest.TestCase):
                     pad_x=20,pad_top=20,pad_bottom=20,expected_text=anchors)
                 except ValueError: pass
                 else: raise AssertionError(anchors)
+            payload,bbox,aspect=vector_table.canonical_svg(pdf,page=1,
+                requested_bbox=[10,10,280,190],pad_x=20,pad_top=20,pad_bottom=20,
+                expected_text=table['expected_text'])
+            assert bbox==[10,10,280,190] and abs(aspect-310/220)<1e-10
+        ''')
+
+    def test_vector_padding_excludes_neighbors_in_actual_render(self):
+        self.case('''
+            import workflow
+            if workflow.find_binary('soffice') is None:
+                sys.exit(77)
             # Neighbor inside the expanded padding extent must not appear in SVG.
             with fitz.open(pdf) as doc:
                 doc[0].draw_rect(fitz.Rect(282,20,290,80),fill=(1,0,0))
@@ -249,7 +262,7 @@ class IntegratedCropAssetTests(unittest.TestCase):
             assert any(max(pixel)<200 for pixel in im.getdata())
             assert not any(r>200 and g<80 and b<80 for r,g,b in im.getdata())
             assert bbox==[10,10,280,190] and abs(aspect-310/220)<1e-10
-        ''')
+        ''', requires_render=True)
 
     def test_native_inventory_binding_malformed_and_duplicate_checks(self):
         self.case('''
