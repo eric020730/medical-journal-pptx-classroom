@@ -60,8 +60,8 @@ PUBLIC_ROOT_FILES = {
 }
 PUBLIC_DOCUMENTS = {"PRIVACY.md", "TROUBLESHOOTING.md", "GLOBAL-INSTALL.md"}
 PUBLIC_TOOLS = {
-    "classroom.py", "image_polarity.py", "make_demo_paper.py", "package_release.py",
-    "qa_check.py", "release_version.py", "classroom_preflight.py", "codex_setup.py",
+    "classroom.py", "make_demo_paper.py", "package_release.py",
+    "release_version.py", "classroom_preflight.py", "codex_setup.py",
     "check_clean_install.py",
 }
 PUBLIC_TESTS = {
@@ -76,7 +76,7 @@ PUBLIC_GITHUB_FILES = {
     ".github/workflows/release.yml",
 }
 PUBLIC_SKILL_NAMES = {
-    "medical-journal-to-pptx-classroom", "medical-journal-to-pptx-integrated",
+    "medical-journal-to-pptx-integrated",
 }
 
 
@@ -143,9 +143,7 @@ def release_files() -> list[Path]:
             continue
         relative = path.relative_to(PROJECT_ROOT)
         if (
-            relative.parts[:3]
-            == (".agents", "skills", "medical-journal-to-pptx-integrated")
-            or relative.name.startswith("install-global")
+            relative.name.startswith("install-global")
             or relative == Path("docs/GLOBAL-INSTALL.md")
             or relative == Path("tools/check_clean_install.py")
             or relative in {
@@ -154,6 +152,8 @@ def release_files() -> list[Path]:
                 Path(".github/workflows/release.yml"),
             }
         ):
+            continue
+        if relative.parts[:1] == ("tests",):
             continue
         if should_package(relative):
             files.append(relative)
@@ -166,7 +166,7 @@ def validate_release_files(files: list[Path]) -> None:
             "README.md", "AGENTS.md", "CODEX-START.md", "VERSION",
             "setup-codex.sh", "setup-codex.ps1", "tools/codex_setup.py",
             "tools/classroom_preflight.py", "requirements.txt",
-            ".agents/skills/medical-journal-to-pptx-classroom/SKILL.md",
+            ".agents/skills/medical-journal-to-pptx-integrated/SKILL.md",
             "sample-papers/classroom-demo-paper.pdf",
         )
     }

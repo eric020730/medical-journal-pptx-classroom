@@ -24,7 +24,13 @@ from typing import Any, Mapping
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = PROJECT_ROOT / ".classroom-project.json"
 CONFIG = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-SKILL_ROOT = PROJECT_ROOT / ".agents" / "skills" / CONFIG["skill_name"]
+SKILL_NAME = "medical-journal-to-pptx-integrated"
+SKILL_ROOT = PROJECT_ROOT / ".agents" / "skills" / SKILL_NAME
+PROJECT_PYTHON = PROJECT_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+INTEGRATED_COMMANDS = {
+    "init-run", "prepare", "qa-spec", "build", "qa", "qa-status",
+    "render", "visual-review", "run", "image-qa",
+}
 SKILL_SCRIPTS = SKILL_ROOT / "scripts"
 PAPERS_DIR = PROJECT_ROOT / CONFIG["directories"]["papers"]
 OUTPUTS_DIR = PROJECT_ROOT / CONFIG["directories"]["outputs"]
@@ -65,8 +71,26 @@ def ensure_directories() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def skill_version() -> str:
+    return (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def integrated_command(arguments: list[str]) -> list[str]:
+    """Pin the classroom interpreter; never consult a user's global runtime."""
+    if any(argument.split("=", 1)[0] == "--runtime-python" for argument in arguments):
+        raise ValueError("Classroom runtime is fixed to the project .venv.")
+    if (PROJECT_ROOT / ".venv").is_symlink():
+        raise RuntimeError("Project .venv must not be a symlink to another runtime.")
+    if not PROJECT_PYTHON.is_file():
+        raise FileNotFoundError("Project .venv is missing; run setup-codex first.")
+    entry = SKILL_SCRIPTS / "run.py"
+    if not entry.is_file():
+        raise FileNotFoundError(f"Repository integrated entry point is missing: {entry}")
+    return [str(PROJECT_PYTHON), str(entry), "--runtime-python", str(PROJECT_PYTHON), *arguments]
+
+
 def semantic_version() -> str:
-    match = re.search(r"v\d+\.\d+\.\d+", CONFIG["classroom_skill_version"])
+    match = re.search(r"v\d+\.\d+\.\d+", skill_version())
     if match is None:
         raise ValueError("Project classroom_skill_version has no semantic version.")
     return match.group(0)
@@ -137,10 +161,22 @@ def binary_candidates(
 
 
 def find_binary(name: str) -> Path | None:
-    discovered = shutil.which(name)
+    system = platform.system()
+    managed = PROJECT_ROOT / ".bootstrap"
+    if name == "soffice":
+        local = (managed / "libreoffice" / "LibreOffice.app" / "Contents" / "MacOS" / "soffice"
+                 if system == "Darwin" else managed / "libreoffice" / "program" /
+                 ("soffice.com" if system == "Windows" else "soffice"))
+    else:
+        local = managed / "pixi-home" / "bin" / (name + (".exe" if system == "Windows" else ""))
+    if local.is_file():
+        return local.absolute()
+    discovered = shutil.which("soffice.com" if name == "soffice" and system == "Windows" else name)
     if discovered:
         return Path(discovered).resolve()
     for candidate in binary_candidates(name):
+        if name == "soffice" and system == "Windows":
+            candidate = candidate.with_suffix(".com")
         if candidate.is_file():
             return candidate.resolve()
     return None
@@ -149,10 +185,18 @@ def find_binary(name: str) -> Path | None:
 def subprocess_environment() -> dict[str, str]:
     """Expose discovered native tools to bundled scripts that call them by name."""
     environment = dict(os.environ)
+    environment["MEDICAL_JOURNAL_PPTX_PROJECT_ROOT"] = str(PROJECT_ROOT)
+    environment["MEDICAL_JOURNAL_PPTX_PYTHON"] = str(PROJECT_PYTHON)
+    environment["MEDICAL_JOURNAL_PPTX_RUNTIME"] = str(PROJECT_ROOT / ".venv")
+    environment.pop("PYTHONPATH", None)
+    environment.pop("PYTHONHOME", None)
+    environment["PYTHONNOUSERSITE"] = "1"
     prefixes: list[str] = []
     for name in ("soffice", "pdftoppm"):
         binary = find_binary(name)
         if binary is not None:
+            environment["MEDICAL_JOURNAL_PPTX_SOFFICE" if name == "soffice"
+                        else "MEDICAL_JOURNAL_PPTX_PDFTOPPM"] = str(binary)
             directory = str(binary.parent)
             if directory not in prefixes:
                 prefixes.append(directory)
@@ -258,7 +302,7 @@ def initialize_run(source_pdf: Path, mode: str) -> dict[str, Any]:
         "output_pptx": str(output),
         "output_pdf": str(output.with_suffix(".pdf")),
         "classroom_version": CONFIG["classroom_version"],
-        "skill_version": CONFIG["classroom_skill_version"],
+        "skill_version": skill_version(),
         "slide_budget": CONFIG["modes"][mode],
     }
 
@@ -271,7 +315,7 @@ def initialize_run(source_pdf: Path, mode: str) -> dict[str, Any]:
         f"- run_id: {run_id}",
         f"- mode: {mode}",
         f"- classroom_version: {CONFIG['classroom_version']}",
-        f"- skill_version: {CONFIG['classroom_skill_version']}",
+        f"- skill_version: {skill_version()}",
         f"- source_pdf: {source_pdf}",
         f"- source_sha256: {payload['source_sha256']}",
         "- content_generation: fresh_full_regeneration",
@@ -317,6 +361,11 @@ def environment_report(strict: bool = False) -> dict[str, Any]:
         )
     )
 
+    checks.append(check_result(
+        "Project Python environment",
+        "ok" if Path(sys.prefix).resolve() == (PROJECT_ROOT / ".venv").resolve() else "error",
+        str(sys.prefix),
+    ))
     skill_file = SKILL_ROOT / "SKILL.md"
     checks.append(
         check_result(
@@ -334,7 +383,7 @@ def environment_report(strict: bool = False) -> dict[str, Any]:
     checks.append(
         check_result(
             "Classroom skill version",
-            "ok" if version_detail == CONFIG["classroom_skill_version"] else "error",
+            "ok" if version_detail == CONFIG["integrated_skill_version"] else "error",
             version_detail,
         )
     )
@@ -402,7 +451,7 @@ def print_report(report: dict[str, Any], *, as_json: bool) -> None:
         return
     print(
         f"Medical Journal PPTX Classroom v{CONFIG['classroom_version']} "
-        f"| skill {CONFIG['classroom_skill_version']}"
+        f"| skill {skill_version()}"
     )
     print(f"Platform: {report['platform']}")
     print(f"Project:  {report['project_root']}")
@@ -418,7 +467,7 @@ def paths_payload() -> dict[str, Any]:
     ensure_directories()
     return {
         "project_root": str(PROJECT_ROOT),
-        "skill_name": CONFIG["skill_name"],
+        "skill_name": SKILL_NAME,
         "skill_root": str(SKILL_ROOT),
         "python": sys.executable,
         "papers": str(PAPERS_DIR),
@@ -427,7 +476,7 @@ def paths_payload() -> dict[str, Any]:
         "soffice": str(binary) if (binary := find_binary("soffice")) else None,
         "pdftoppm": str(binary) if (binary := find_binary("pdftoppm")) else None,
         "classroom_version": CONFIG["classroom_version"],
-        "skill_version": CONFIG["classroom_skill_version"],
+        "skill_version": skill_version(),
     }
 
 
@@ -504,209 +553,76 @@ def preview_contact_sheet(pdf: Path, destination: Path) -> Path:
     return contact_sheet
 
 
-def render_presentation(pptx: Path, *, preview: bool) -> dict[str, Any]:
-    presentation = pptx.expanduser().resolve()
-    if not presentation.is_file() or presentation.suffix.lower() != ".pptx":
-        raise FileNotFoundError(f"PowerPoint file not found: {pptx}")
+def verify_smoke_artifacts(report: dict[str, Any], *, style: str, render: bool) -> None:
+    """Check files and a freshly evaluated receipt before cleaning any smoke outputs."""
+    from pptx import Presentation
+    import pymupdf as fitz
 
-    soffice = find_binary("soffice")
-    if soffice is None:
-        raise RuntimeError(
-            "LibreOffice was not found. The PPTX remains usable; rerun the system "
-            "installer to enable optional PDF export."
-        )
-
-    with tempfile.TemporaryDirectory(prefix="libreoffice-profile-") as temporary:
-        profile = (Path(temporary) / "profile").as_uri()
-        run_checked(
-            [
-                str(soffice),
-                f"-env:UserInstallation={profile}",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(presentation.parent),
-                str(presentation),
-            ],
-            capture=True,
-        )
-
-    output_pdf = presentation.with_suffix(".pdf")
-    if not output_pdf.is_file():
-        raise RuntimeError(f"LibreOffice did not create the expected PDF: {output_pdf}")
-
-    result: dict[str, Any] = {"pptx": str(presentation), "pdf": str(output_pdf)}
-    if preview:
-        directory = WORK_DIR / "previews" / safe_filename(presentation.stem)
-        result["contact_sheet"] = str(preview_contact_sheet(output_pdf, directory))
-        result["preview_dir"] = str(directory)
-    return result
+    root = Path(report["work_dir"]).resolve()
+    if root.parent != WORK_DIR.resolve() or not root.name.startswith("integrated-smoke-"):
+        raise RuntimeError("Integrated smoke returned an unexpected work directory.")
+    output = root / f"synthetic_{style}_full.pptx"
+    if len(Presentation(output).slides) != 40:
+        raise RuntimeError(f"Integrated {style} PPTX does not contain 40 slides.")
+    status = run_checked(integrated_command([
+        "qa-status", str(output), "--spec", str(root / "deck_spec.json"),
+        "--mode", "full", "--style", style, "--json",
+    ]), capture=True, forward=False)
+    receipt = json.loads(status.stdout)
+    if receipt.get("ok") is not True:
+        raise RuntimeError(f"Integrated {style} QA receipt is not current.")
+    report["qa_receipt_current"] = True
+    if render:
+        render_receipt = receipt.get("render", {})
+        if (not isinstance(render_receipt, dict) or render_receipt.get("ok") is not True
+                or render_receipt.get("complete") is not True):
+            raise RuntimeError(f"Integrated {style} render receipt is missing or incomplete.")
+        rendered = report["render"]
+        pdf = Path(rendered["pdf"]).resolve()
+        preview_dir = Path(rendered["preview_dir"]).resolve()
+        contact = Path(rendered["contact_sheet"]).resolve()
+        if not all(path.is_relative_to(root) for path in (pdf, preview_dir, contact)):
+            raise RuntimeError("Smoke render artifacts must remain inside the synthetic run.")
+        with fitz.open(pdf) as document:
+            if len(document) != 40:
+                raise RuntimeError(f"Integrated {style} PDF does not contain 40 pages.")
+        previews = list(preview_dir.glob("slide-*.jpg"))
+        if len(previews) != 40 or not contact.is_file():
+            raise RuntimeError(f"Integrated {style} preview files are incomplete.")
+        # qa-status validates the render receipt's file hashes and page numbering.
+        report["artifacts_verified"] = True
 
 
 def smoke_test(*, keep: bool, render: bool) -> dict[str, Any]:
+    """Exercise the same complete integrated workflow students will run, in both styles."""
     ensure_directories()
-    smoke_directory = Path(tempfile.mkdtemp(prefix="smoke-", dir=WORK_DIR))
-    try:
-        from make_demo_paper import create_demo_paper
-
-        paper = smoke_directory / "synthetic-smoke-paper.pdf"
-        create_demo_paper(paper)
-        extracted = smoke_directory / "extracted"
-        run_checked(
-            [
-                sys.executable,
-                str(resolve_skill_script("extract_from_pdf")),
-                str(paper),
-                "--out",
-                str(extracted),
-            ],
-            capture=True,
-        )
-        manifest = extracted / "manifest.json"
-        if not manifest.is_file():
-            raise RuntimeError("The PDF extractor did not produce manifest.json.")
-        run_checked(
-            [sys.executable, str(PROJECT_ROOT / "tools" / "image_polarity.py"), str(manifest)],
-            capture=True,
-        )
-
-        sources = [
-            *sorted((extracted / "unique").glob("*.png")),
-            *sorted((extracted / "figures").glob("*.png")),
-            *sorted(extracted.glob("image_*.png")),
-            *sorted(extracted.glob("page_*.png")),
-        ]
-        if not sources:
-            raise RuntimeError("The PDF extractor did not produce any figure or page image.")
-
-        asset_directory = smoke_directory / "final_assets"
-        asset_directory.mkdir()
-        figure = asset_directory / "Figure_1.png"
-        run_checked(
-            [
-                sys.executable,
-                str(resolve_skill_script("postprocess_assets")),
-                "trim",
-                str(sources[0]),
-                str(figure),
-                "--asset-type",
-                "figure",
-            ],
-            capture=True,
-        )
-
-        spec = {
-            "meta": {"footer_label": "Synthetic Education Team — Classroom Demo 2026"},
-            "slides": [
-                {
-                    "type": "title",
-                    "title": "Synthetic Classroom Imaging Study",
-                    "authors": "Classroom Education Team",
-                    "citation": "Synthetic teaching example, 2026",
-                    "notes": "📚 這是虛構的教學測試，不能視為真實臨床證據。",
-                },
-                {
-                    "type": "part",
-                    "number": 1,
-                    "title": "Background and Study Design",
-                    "notes": "🧭 本段介紹虛構研究的教學架構。",
-                },
-                {
-                    "type": "content",
-                    "title": "Study Design",
-                    "body": [
-                        "Study population:",
-                        "• Synthetic imaging cases for classroom validation",
-                        "",
-                        "Clinical meaning:",
-                        "→ Demonstrates the portable slide-building workflow",
-                        "✅ Results are fictional and not clinical evidence",
-                    ],
-                    "notes": "🔍 **Synthetic study**（虛構研究）用於驗證簡報產生流程。",
-                },
-                {
-                    "type": "figure",
-                    "title": "Results: Synthetic Imaging Workflow",
-                    "image": "final_assets/Figure_1.png",
-                    "caption": "Figure 1. Synthetic classroom demonstration image.",
-                    "notes": "🖼️【圖片說明 — Figure 1】此圖為自動產生的虛構教學圖片。",
-                },
-                {
-                    "type": "thanks",
-                    "title": "Thank You",
-                    "citation": "Synthetic teaching example, 2026",
-                    "notes": "🙏 測試完成，接下來可使用經授權的真實期刊論文。",
-                },
-            ],
-        }
-        spec_path = smoke_directory / "deck_spec.json"
-        spec_path.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
-        run_checked(
-            [
-                sys.executable,
-                str(resolve_skill_script("postprocess_assets")),
-                "audit-final",
-                str(asset_directory),
-                "--spec",
-                str(spec_path),
-            ],
-            capture=True,
-        )
-        run_checked(
-            [
-                sys.executable,
-                str(PROJECT_ROOT / "tools" / "qa_check.py"),
-                str(spec_path),
-                "--spec-only",
-                "--mode",
-                "smoke",
-            ],
-            capture=True,
-        )
-
-        output = smoke_directory / "classroom-smoke-test.pptx"
-        run_checked(
-            [
-                sys.executable,
-                str(resolve_skill_script("build_deck")),
-                str(spec_path),
-                "--out",
-                str(output),
-            ],
-            capture=True,
-        )
-        run_checked(
-            [
-                sys.executable,
-                str(PROJECT_ROOT / "tools" / "qa_check.py"),
-                str(output),
-                "--spec",
-                str(spec_path),
-                "--mode",
-                "smoke",
-            ],
-            capture=True,
-        )
-
-        result: dict[str, Any] = {
-            "ok": True,
-            "pdf_extraction": True,
-            "image_polarity_qa": True,
-            "figure_postprocessing": True,
-            "asset_audit": True,
-            "advanced_spec_qa": True,
-            "pptx_generation": True,
-            "speaker_notes_and_logo_qa": True,
-            "slides": len(spec["slides"]),
-            "work_dir": str(smoke_directory) if keep else None,
-        }
+    results: dict[str, Any] = {}
+    for style in ("standard", "nice"):
+        arguments = ["smoke-test", "--workspace", str(PROJECT_ROOT),
+                     "--mode", "full", "--style", style, "--keep", "--json"]
         if render:
-            result["render"] = render_presentation(output, preview=True)
-        return result
-    finally:
+            arguments.append("--render")
+        process = run_checked(integrated_command(arguments), capture=True, forward=False)
+        report = json.loads(process.stdout)
+        if (report.get("ok") is not True or report.get("mode") != "full"
+                or report.get("style") != style or report.get("slides") != 40
+                or report.get("prebuild_qa") is not True
+                or report.get("postbuild_qa") is not True
+                or report.get("image_polarity") is not True):
+            raise RuntimeError(f"Integrated {style} full-deck smoke did not pass all gates.")
+        rendered = report.get("render", {})
+        if render and (not isinstance(rendered, dict) or not rendered.get("pdf")
+                       or not rendered.get("contact_sheet")
+                       or rendered.get("preview_pages") != report["slides"]):
+            raise RuntimeError(f"Integrated {style} smoke did not render every slide.")
+        verify_smoke_artifacts(report, style=style, render=render)
+        results[style] = report
         if not keep:
-            shutil.rmtree(smoke_directory, ignore_errors=True)
+            # verify_smoke_artifacts checked this is an isolated synthetic run.
+            shutil.rmtree(report["work_dir"])
+            report["work_dir"] = None
+    return {"ok": True, "slides": 40, "mode": "full", "styles": results,
+            "render": results["standard"].get("render")}
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -727,6 +643,7 @@ def create_parser() -> argparse.ArgumentParser:
         )
         run_parser.add_argument("pdf")
         run_parser.add_argument("--mode", choices=tuple(CONFIG["modes"]), default="full")
+        run_parser.add_argument("--style", choices=("standard", "nice"), default="standard")
         run_parser.add_argument("--json", action="store_true")
 
     run = subparsers.add_parser("run", help="Run a bundled image-processing helper script")
@@ -736,13 +653,24 @@ def create_parser() -> argparse.ArgumentParser:
     qa = subparsers.add_parser("qa", help="Validate a completed presentation")
     qa.add_argument("pptx")
     qa.add_argument("--spec")
-    qa.add_argument("--mode", choices=(*CONFIG["modes"], "smoke"), default="full")
+    qa.add_argument("--mode", choices=tuple(CONFIG["modes"]), default="full")
     qa.add_argument("--json", action="store_true")
 
     qa_spec = subparsers.add_parser("qa-spec", help="Validate a deck specification before build")
     qa_spec.add_argument("spec")
-    qa_spec.add_argument("--mode", choices=(*CONFIG["modes"], "smoke"), default="full")
+    qa_spec.add_argument("--mode", choices=tuple(CONFIG["modes"]), default="full")
     qa_spec.add_argument("--json", action="store_true")
+
+    for command in (qa, qa_spec):
+        command.add_argument("--style", choices=("standard", "nice"), default="standard")
+    build = subparsers.add_parser("build", help="Build through integrated prebuild QA")
+    build.add_argument("spec")
+    build.add_argument("--out", required=True)
+    build.add_argument("--mode", choices=("full",), default="full")
+    build.add_argument("--style", choices=("standard", "nice"), default="standard")
+    build.add_argument("--json", action="store_true")
+    subparsers.add_parser("qa-status", help="Inspect integrated QA and delivery receipts")
+    subparsers.add_parser("visual-review", help="Record explicit review of every rendered page")
 
     image_qa = subparsers.add_parser("image-qa", help="Compare extracted images against the PDF")
     image_qa.add_argument("manifest", help="Extraction manifest or extracted directory")
@@ -752,6 +680,7 @@ def create_parser() -> argparse.ArgumentParser:
     render = subparsers.add_parser("render", help="Export a presentation to PDF")
     render.add_argument("pptx")
     render.add_argument("--preview", action="store_true")
+    render.add_argument("--overwrite", action="store_true")
     render.add_argument("--json", action="store_true")
 
     smoke = subparsers.add_parser("smoke-test", help="Run an end-to-end synthetic test")
@@ -770,7 +699,18 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = create_parser().parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in INTEGRATED_COMMANDS:
+        if arguments[0] in {"prepare", "init-run"} and not any(
+            arg in {"-h", "--help"} for arg in arguments
+        ):
+            supplied = {arg.split("=", 1)[0] for arg in arguments}
+            for option, default in (("--workspace", PROJECT_ROOT), ("--output-dir", OUTPUTS_DIR)):
+                if option not in supplied:
+                    arguments.extend([option, str(default)])
+        run_checked(integrated_command(arguments))
+        return 0
+    args = create_parser().parse_args(arguments)
 
     if args.command == "doctor":
         report = environment_report(strict=args.strict)
@@ -779,93 +719,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "paths":
         payload = paths_payload()
-        if args.json:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
-        else:
-            for key, value in payload.items():
-                print(f"{key}: {value}")
-        return 0
-
-    if args.command in ("init-run", "prepare"):
-        source = resolve_pdf(args.pdf)
-        payload = initialize_run(source, args.mode)
-        if args.command == "prepare":
-            run_checked(
-                [
-                    sys.executable,
-                    str(resolve_skill_script("extract_from_pdf")),
-                    str(source),
-                    "--out",
-                    payload["extracted_dir"],
-                ],
-                capture=args.json,
-            )
-            payload["extraction_complete"] = True
-            manifest = Path(payload["extracted_dir"]) / "manifest.json"
-            run_checked(
-                [sys.executable, str(PROJECT_ROOT / "tools" / "image_polarity.py"), str(manifest)],
-                capture=args.json,
-            )
-            report = json.loads((manifest.parent / "polarity-report.json").read_text(encoding="utf-8"))
-            payload["image_polarity_audit"] = {
-                "checked_figures": report["checked_figures"],
-                "unsafe_raw_streams": report["unsafe_raw_streams"],
-                "report": str(manifest.parent / "polarity-report.json"),
-            }
-        if args.json:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
-        else:
-            for key, value in payload.items():
-                print(f"{key}: {value}")
-        return 0
-
-    if args.command == "run":
-        arguments = args.arguments
-        if arguments and arguments[0] == "--":
-            arguments = arguments[1:]
-        run_checked([sys.executable, str(resolve_skill_script(args.script)), *arguments])
-        return 0
-
-    if args.command == "qa":
-        command = [
-            sys.executable,
-            str(PROJECT_ROOT / "tools" / "qa_check.py"),
-            args.pptx,
-            "--mode",
-            args.mode,
-        ]
-        if args.spec:
-            command.extend(["--spec", args.spec])
-        if args.json:
-            command.append("--json")
-        run_checked(command)
-        return 0
-
-    if args.command == "qa-spec":
-        command = [
-            sys.executable,
-            str(PROJECT_ROOT / "tools" / "qa_check.py"),
-            args.spec,
-            "--spec-only",
-            "--mode",
-            args.mode,
-        ]
-        if args.json:
-            command.append("--json")
-        run_checked(command)
-        return 0
-
-    if args.command == "image-qa":
-        command = [sys.executable, str(PROJECT_ROOT / "tools" / "image_polarity.py"), args.manifest]
-        if args.spec:
-            command.extend(["--spec", args.spec])
-        if args.json:
-            command.append("--json")
-        run_checked(command)
-        return 0
-
-    if args.command == "render":
-        payload = render_presentation(Path(args.pptx), preview=args.preview)
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:

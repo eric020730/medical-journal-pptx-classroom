@@ -13,9 +13,11 @@ export PIXI_CACHE_DIR="$ROOT/.bootstrap/pixi-cache"
 export PIXI_NO_PATH_UPDATE=1
 export PIXI_COLOR=never
 export PIXI_NO_PROGRESS=true
+unset PYTHONHOME PYTHONPATH
+export PYTHONNOUSERSITE=1
 export PYTHONUTF8=1
 export PATH="$ROOT/.bootstrap/pixi-home/bin:$ROOT/.bootstrap/libreoffice/LibreOffice.app/Contents/MacOS:$ROOT/.bootstrap/libreoffice/program:$PATH"
-QUALITY="$ROOT/.agents/skills/medical-journal-to-pptx-classroom/scripts/quality_tools.py"
+QUALITY="$ROOT/.agents/skills/medical-journal-to-pptx-integrated/scripts/quality_tools.py"
 PY="$ROOT/.venv/bin/python"
 
 if [[ "${1:-}" == '--check-only' ]]; then

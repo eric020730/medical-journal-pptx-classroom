@@ -1,7 +1,7 @@
 name: Single PDF-to-PPTX workflow
 on:
   push:
-    branches: [main, 'teaching/**']
+    branches: [main, 'teaching/**', 'integrate-*']
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -74,6 +74,7 @@ jobs:
           .venv/bin/python tools/classroom.py demo
           .venv/bin/python tools/release_version.py
           .venv/bin/python -m unittest discover -s tests -v
+          .venv/bin/python -m unittest discover -s .agents/skills/medical-journal-to-pptx-integrated/scripts -p "test_*.py" -v
           .venv/bin/python tools/package_release.py
           bash -n setup-codex.sh journal
           bash setup-codex.sh
@@ -92,6 +93,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $py -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $py -m unittest discover -s .agents/skills/medical-journal-to-pptx-integrated/scripts -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $py tools/package_release.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./setup-codex.ps1
@@ -99,14 +102,14 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir .skill-work/archive-check
-          .venv/bin/python -c "import glob,zipfile; zipfile.ZipFile(glob.glob('dist/*.zip')[0]).extractall('.skill-work/archive-check')"
+          .venv/bin/python -c "import glob,zipfile; zipfile.ZipFile(glob.glob('dist/medical-journal-pptx-classroom-*.zip')[0]).extractall('.skill-work/archive-check')"
           cd .skill-work/archive-check/medical-journal-pptx-classroom
           bash setup-codex.sh
       - name: Verify shipped ZIP in a fresh folder (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $zip = (Get-ChildItem dist/*.zip | Select-Object -First 1).FullName
+          $zip = (Get-ChildItem dist/medical-journal-pptx-classroom-*.zip | Select-Object -First 1).FullName
           Expand-Archive -LiteralPath $zip -DestinationPath .skill-work/archive-check
           Set-Location .skill-work/archive-check/medical-journal-pptx-classroom
           ./setup-codex.ps1
@@ -136,7 +139,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -r requirements.txt
-      - run: python tools/classroom.py demo
-      - run: python -m unittest discover -s tests -v
-      - run: python tools/classroom.py smoke-test
+      - run: python -m venv .venv
+      - run: .venv/bin/python -m pip install -r requirements.txt
+      - run: .venv/bin/python tools/classroom.py demo
+      - run: .venv/bin/python -m unittest discover -s tests -v
+      - run: .venv/bin/python -m unittest discover -s .agents/skills/medical-journal-to-pptx-integrated/scripts -p "test_*.py" -v
+      - run: .venv/bin/python tools/classroom.py smoke-test

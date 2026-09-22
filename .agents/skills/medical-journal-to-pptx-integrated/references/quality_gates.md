@@ -195,3 +195,5 @@ integrated renderer with `--preview`, require PDF and preview page counts to
 match, and visually inspect every slide for clipping, overlap, unreadable text,
 bad crops, or layout drift. If either tool is unavailable, the editable PPTX may
 be reported as an intermediate artifact but not as a completed deliverable.
+
+Use [rendered delivery verification](rendered_delivery.md) to bind visual review to the current PPTX/PDF/previews and run `qa-status --require-delivery`. Basic automatic QA status alone does not establish delivery readiness.

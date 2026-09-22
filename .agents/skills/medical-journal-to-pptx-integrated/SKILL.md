@@ -5,15 +5,11 @@ description: Create comprehensive 40-55-slide teaching PowerPoints from an autho
 
 # Medical Journal to PowerPoint: Integrated Edition
 
-This globally installable skill is self-contained. Resolve its root from this
-`SKILL.md`; never assume a repository, username, cloud path, or project runtime.
+This self-contained skill supports repository and global installation. Resolve its root from this `SKILL.md`; never assume a developer path.
 
-Use `scripts/run.py` as the portable entry point. On macOS/Linux invoke
-`python3 <skill-root>/scripts/run.py`; on Windows use
-`py -3 <skill-root>\scripts\run.py`. The entry point finds the installed shared
-runtime or a compatible current Python environment.
-For a copyright-safe example without patient data, run
-`scripts/run.py demo --out <workspace>/synthetic-demo.pdf`.
+Use `journal` / `journal.cmd` inside the classroom repository; it binds the project's `.venv` explicitly. If tools are missing, follow root `CODEX-START.md` and run `setup-codex.sh` / `setup-codex.ps1`; do not assign manual installation to students.
+Outside the repository, use `python3 <skill-root>/scripts/run.py` (Windows: `py -3 <skill-root>\scripts\run.py`) with the standalone managed runtime.
+For a copyright-safe synthetic PDF: `scripts/run.py demo --out <workspace>/synthetic-demo.pdf`.
 
 ## Create a full teaching deck and choose its visual style
 
@@ -33,7 +29,7 @@ language rules, and final QA.
 
 1. Resolve the user's authorized source PDF, active workspace, and requested
    output location. Follow workspace `AGENTS.md` output rules when present;
-   otherwise place final `.pptx` and optional `.pdf` directly in the workspace
+   otherwise place final `.pptx` and `.pdf` directly in the workspace
    or user-selected output directory. Keep all run files in
    `<workspace>/.skill-work/<run-id>/`; never overwrite an unrelated deck.
 2. Run `scripts/run.py doctor --strict`; LibreOffice and Poppler are mandatory
@@ -136,7 +132,11 @@ language rules, and final QA.
    <output.pptx> --preview`; verify PDF and preview page counts match, then
    inspect every preview for clipping, overlap, unreadable text, bad crops, or
    layout drift. Rendering does not overwrite an existing PDF unless explicitly
-   requested. Report only verified final artifacts.
+   requested. Rendering success alone is not visual review. Compare every
+   Figure/Table with its original page, including panel coverage, table headers,
+   last rows and footnotes. Read [rendered delivery verification](references/rendered_delivery.md)
+   to record actual visual review and require `qa-status --require-delivery`
+   before declaring final delivery. Report only verified final artifacts.
    Successful final QA writes `<output.pptx>.qa.json`. Before reusing a prior
    pass, run `scripts/run.py qa-status <output.pptx> --spec <spec.json> --style
    <style>`; a stale/missing receipt requires full QA again. This unsigned local

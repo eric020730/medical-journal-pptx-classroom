@@ -451,6 +451,18 @@ def make_spec_binding(specification: dict[str, Any], spec_path: Path) -> dict[st
                 "sha256": _sha256_file(map_path),
             }
         }
+    meta = specification.get("meta")
+    if isinstance(meta, dict) and "panel_crop_plan" in meta:
+        plan_path = _resolve_spec_asset(meta["panel_crop_plan"], spec_path.parent)
+        if plan_path is None:
+            raise TypeError("meta.panel_crop_plan must be a non-empty path string")
+        # Keep the existing spec/slide/map fingerprints unchanged. Bind the
+        # reviewed inventory's bytes as well as its spec-relative identity;
+        # editing a plan in place must invalidate an already-built deck.
+        binding.setdefault("external_bindings", {})["panel_crop_plan"] = {
+            "path": str(plan_path),
+            "sha256": _sha256_bytes(plan_path.read_bytes()),
+        }
     return binding
 
 

@@ -11,6 +11,7 @@ import html
 import json
 import math
 import re
+import tempfile
 from pathlib import Path
 
 import pymupdf as fitz
@@ -23,8 +24,14 @@ def digest(path):
 
 def region(page, box, expected=(), *, image_only=False):
     """Reject out-of-page bounds and partial words/images before rasterization."""
-    if len(box) != 4 or not all(math.isfinite(v) for v in box):
+    if (not isinstance(box, (list, tuple)) or len(box) != 4
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                       and math.isfinite(v) for v in box)):
         raise ValueError("bbox must contain four finite PDF-point coordinates")
+    if not isinstance(expected, (list, tuple)) or not all(
+        isinstance(term, str) and term.strip() for term in expected
+    ):
+        raise ValueError("expected_text must contain non-empty strings")
     rect = fitz.Rect(box)
     if rect.is_empty or not page.rect.contains(rect):
         raise ValueError(f"Invalid/out-of-page bbox: {box}")
@@ -43,6 +50,7 @@ def region(page, box, expected=(), *, image_only=False):
                      for c in s['chars'] if wr.contains(fitz.Point(c[2]))]
             if chars and all((r & rect).is_empty for r in chars):
                 continue
+            raise ValueError(f"Image-only crop contains source text {word[4]!r}")
         if overlap.get_area() < wr.get_area() - 0.01:
             raise ValueError(f"Crop cuts text {word[4]!r}: {box}")
         selected.append(word[4])
@@ -137,12 +145,14 @@ def generate(plan, output):
     ids = [a["id"] for a in plan["assets"]]
     if not ids:
         raise ValueError('Asset inventory must not be empty')
-    if len(ids) != len(set(ids)) or set(ids) != set(plan["expected_assets"]):
+    if (len(ids) != len(set(ids)) or len(plan["expected_assets"]) != len(ids)
+            or set(ids) != set(plan["expected_assets"])):
         raise ValueError("Asset inventory mismatch/duplicate")
     if any(not re.fullmatch(r"[A-Za-z0-9_-]+", name) for name in ids):
         raise ValueError("Unsafe asset ID")
     dpi = plan.get("dpi", 300)
-    if not 72 <= dpi <= 600:
+    if (isinstance(dpi, bool) or not isinstance(dpi, (int, float))
+            or not math.isfinite(dpi) or not 72 <= dpi <= 600):
         raise ValueError("dpi must be 72..600")
     output = Path(output)
     if output.exists():
@@ -190,12 +200,23 @@ def generate(plan, output):
                     im = render(page, rect, dpi)
                     ims.append(im)
                     parts.append((asset["id"]+"_"+panel["label"], stack([im])))
+                    if 'export_image_panels' in asset and not isinstance(asset['export_image_panels'], bool):
+                        raise ValueError('export_image_panels must be a boolean')
                     if asset.get('export_image_panels', False):
                         content = image_region(page, rect)
                         name = asset['id'] + '_' + panel['label'] + '_image'
-                        parts.append((name, render(page, content, dpi)))
+                        image = render(page, content, dpi)
+                        review = panel.get('source_panel_label')
+                        if review is not None:
+                            from recompose_panels_banded import label_details
+                            details = label_details({'source_panel_label': review}, image)
+                            if details['geometry_space'] != 'verified-full-panel-review':
+                                raise ValueError('Image-only label review requires verified full-panel absence evidence')
+                        parts.append((name, image))
                         image_regions[name] = {'page': panel['page'], 'bbox': list(content),
                                                'original_panel': panel['label']}
+                        if review is not None:
+                            image_regions[name]['source_panel_label'] = review
                 parts.append((asset["id"], grid(ims, columns)))
             else:
                 raise ValueError("Unknown asset type")
@@ -215,12 +236,23 @@ def generate(plan, output):
                 meta = {"command": "source-coordinate-crop", "asset_type": asset["type"],
                         "source_sha256": report["source_sha256"], "output_sha256": digest(path),
                         "dpi": dpi, "margin": 16, "plan": asset,
-                        "status": report["status"]}
+                        "status": report["status"], "source": str(source),
+                        "output_id": name, "schema": "medical-journal-source-crop/v1",
+                        "intermediate": asset["type"] == "figure",
+                        "safety_margin_px": 16, "padding_background": "#FFFFFF",
+                        "padded_size_px": list(im.size),
+                        "unpadded_size_px": [im.width - 32, im.height - 32]}
                 if name in image_regions:
-                    meta.update({'margin': 0, 'image_region': image_regions[name],
+                    meta.update({'margin': 0, 'safety_margin_px': 0,
+                                 'unpadded_size_px': list(im.size),
+                                 'image_region': image_regions[name],
                                  'source_pdf': str(source), 'purpose': 'banded-composition-input'})
+                    if 'source_panel_label' in image_regions[name]:
+                        meta['source_panel_label'] = image_regions[name]['source_panel_label']
                 elif asset['type'] == 'figure':
                     meta['purpose'] = 'source-review-not-slide-design'
+                if asset["type"] == "table":
+                    meta["table_safety_margin_px"] = 16
                 path.with_suffix(".png.postprocess.json").write_text(json.dumps(meta, indent=2))
                 report["assets"].append({"id": name, "sha256": digest(path)})
                 if name == asset["id"] or asset["type"] == "table":
@@ -235,6 +267,47 @@ def generate(plan, output):
         (output / "plan.json").write_text(json.dumps(plan, indent=2))
         (output / "index.html").write_text('<meta charset="utf-8"><title>Source-coordinate crop review</title><style>body{font-family:system-ui;background:#edf1f5;padding:24px}section{background:white;padding:24px;margin:24px 0}img{max-width:100%;max-height:1100px}h2{font-size:24px}</style><h1>Source-coordinate crop review</h1><p>Structural checks are not a substitute for visual comparison with the source PDF. Original panel letters are preserved. Figure grids are source-review previews, not a replacement for the slide design. Use image-only panels with the banded compositor and native slide labels when preserving the classroom design.</p>'+"".join(cards))
     return report
+
+
+
+def replay_source_crop(asset, sidecar):
+    """Rebuild the declared output and compare provenance metadata and opaque pixels.
+
+    This authenticates a transform, not its paper binding. The caller must also
+    require the source PDF and every used page from a fresh extraction audit.
+    """
+    try:
+        if sidecar.get("schema") != "medical-journal-source-crop/v1":
+            raise ValueError("unsupported source-crop sidecar schema")
+        source = Path(sidecar["source"]).expanduser()
+        if not source.is_absolute():
+            source = Path(asset).parent / source
+        source = source.resolve()
+        plan_asset = sidecar["plan"]
+        plan = {"pdf": str(source), "source_sha256": sidecar["source_sha256"],
+                "dpi": sidecar["dpi"], "assets": [plan_asset],
+                "expected_assets": [plan_asset["id"]]}
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "replay"
+            report = generate(plan, output)
+            name = sidecar["output_id"]
+            if name not in {item["id"] for item in report["assets"]}:
+                raise ValueError("source-crop output is absent from its plan")
+            regenerated = output / (name + ".png")
+            expected = json.loads(regenerated.with_suffix(".png.postprocess.json").read_text())
+            normalized = dict(sidecar, source=str(source))
+            if normalized != expected:
+                raise ValueError("source-crop metadata does not match deterministic replay")
+            if digest(asset) != sidecar["output_sha256"]:
+                raise ValueError("source-crop output hash mismatch")
+            with Image.open(asset) as actual, Image.open(regenerated) as fresh:
+                if (actual.convert("RGBA").getchannel("A").getextrema() != (255, 255)
+                        or actual.size != fresh.size
+                        or actual.convert("RGB").tobytes() != fresh.convert("RGB").tobytes()):
+                    raise ValueError("source-crop pixels do not match deterministic replay")
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
+        return [f"Source crop {Path(asset).name}: {error}"]
+    return []
 
 
 if __name__ == "__main__":

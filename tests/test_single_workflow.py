@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,11 +19,11 @@ import release_version
 
 
 class SingleWorkflowTests(unittest.TestCase):
-    def test_classroom_and_integrated_skills_are_both_discoverable(self):
+    def test_only_integrated_skill_is_discoverable(self):
         skills = list((ROOT / ".agents" / "skills").glob("*/SKILL.md"))
         self.assertEqual(
             {p.parent.name for p in skills},
-            {"medical-journal-to-pptx-classroom", "medical-journal-to-pptx-integrated"},
+            {"medical-journal-to-pptx-integrated"},
         )
 
     def test_only_required_student_documents_remain(self):
@@ -42,7 +43,7 @@ class SingleWorkflowTests(unittest.TestCase):
                     self.assertTrue((p.parent / target.split("#")[0]).is_file(), (p.name, target))
 
     def test_launchers_and_skill_reference_existing_setup(self):
-        for name in ("journal", "journal.cmd", ".agents/skills/medical-journal-to-pptx-classroom/SKILL.md"):
+        for name in ("journal", "journal.cmd", ".agents/skills/medical-journal-to-pptx-integrated/SKILL.md"):
             text = (ROOT / name).read_text(encoding="utf-8")
             for old in ("setup-" + "macos.command", "setup-" + "windows.cmd"):
                 self.assertNotIn(old, text)
@@ -92,12 +93,33 @@ class SingleWorkflowTests(unittest.TestCase):
                 self.assertTrue(any(name.endswith("/setup-codex.sh") for name in names))
                 self.assertTrue(any(name.endswith("/setup-codex.ps1") for name in names))
                 prefix = "medical-journal-pptx-classroom/"
+                for core in ("run.py", "workflow.py", "qa_check.py", "qa_attestation.py",
+                             "render_attestation.py", "notes_quality.py", "article_asset_map.py",
+                             "source_crops.py", "quality_tools.py", "quality_tools_windows.py"):
+                    self.assertIn(prefix + ".agents/skills/medical-journal-to-pptx-integrated/scripts/" + core, names)
+                self.assertNotIn(prefix + "tools/qa_check.py", names)
+                self.assertNotIn(prefix + "tools/image_polarity.py", names)
+                self.assertFalse(any("tests/fixtures/" in name for name in names))
                 manifest = z.read(prefix + "RELEASE-MANIFEST.txt").decode()
                 for line in manifest.splitlines():
                     if re.match(r"^[a-f0-9]{64}  ", line):
                         digest, name = line.split("  ", 1)
                         self.assertEqual(hashlib.sha256(z.read(prefix + name)).hexdigest(), digest)
                 self.assertFalse(any("install-global" in name or ".bootstrap/" in name for name in names))
+
+    def test_extracted_classroom_archive_can_check_version_and_repackage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = package_release.create_release(root / "original.zip")
+            with zipfile.ZipFile(result["archive"]) as archive:
+                archive.extractall(root / "extracted")
+            shipped = root / "extracted/medical-journal-pptx-classroom"
+            for command in (["tools/release_version.py"],
+                            ["tools/package_release.py", "--out", str(root / "repacked.zip")]):
+                completed = subprocess.run([sys.executable, *command], cwd=shipped,
+                                           text=True, capture_output=True)
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            self.assertTrue((root / "repacked.zip").is_file())
 
     def test_archive_is_reproducible(self):
         with tempfile.TemporaryDirectory() as tmp:

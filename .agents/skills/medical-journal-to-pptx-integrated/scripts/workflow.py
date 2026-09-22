@@ -97,11 +97,49 @@ def binary_candidates(
     return candidates
 
 
+def managed_binary_candidates(name: str, *, operating_system: str | None = None) -> list[Path]:
+    system = operating_system or platform.system()
+    configured = os.environ.get("MEDICAL_JOURNAL_PPTX_PROJECT_ROOT")
+    repository = Path(configured).expanduser().resolve() if configured else SKILL_ROOT.parents[2]
+    if not configured and not (repository / "journal").is_file():
+        return []
+    bootstrap = repository / ".bootstrap"
+    if name == "soffice":
+        if system == "Darwin":
+            return [bootstrap / "libreoffice/LibreOffice.app/Contents/MacOS/soffice"]
+        program = bootstrap / "libreoffice/program"
+        return [program / "soffice.com", program / "soffice.exe"] if system == "Windows" else [program / "soffice"]
+    if name == "pdftoppm":
+        executable = "pdftoppm.exe" if system == "Windows" else "pdftoppm"
+        home = bootstrap / "pixi-home"
+        return [home / "bin" / executable, *sorted(home.glob(f"**/{executable}"))]
+    return []
+
+
 def find_binary(name: str) -> Path | None:
-    discovered = shutil.which(name)
-    if discovered:
-        return Path(discovered).resolve()
-    return next((candidate.resolve() for candidate in binary_candidates(name) if candidate.is_file()), None)
+    managed = next((p for p in managed_binary_candidates(name) if p.is_file()), None)
+    if managed:
+        return managed.resolve()
+    override = os.environ.get("MEDICAL_JOURNAL_PPTX_" + name.upper())
+    if override:
+        candidate = Path(override).expanduser()
+        if not candidate.is_file():
+            raise FileNotFoundError(f"Configured rendering tool is missing: {candidate}")
+        if name == "soffice" and platform.system() == "Windows" and candidate.with_suffix(".com").is_file():
+            candidate = candidate.with_suffix(".com")
+        return candidate.resolve()
+    if name == "soffice" and platform.system() == "Windows":
+        discovered = shutil.which("soffice.com") or shutil.which(name)
+    else:
+        discovered = shutil.which(name)
+    candidate = Path(discovered) if discovered else next(
+        (p for p in binary_candidates(name) if p.is_file()), None
+    )
+    if candidate and name == "soffice" and platform.system() == "Windows":
+        console = candidate.with_suffix(".com")
+        if console.is_file():
+            candidate = console
+    return candidate.resolve() if candidate else None
 
 
 def subprocess_environment() -> dict[str, str]:
@@ -289,7 +327,7 @@ def preview_contact_sheet(pdf: Path, destination: Path) -> dict[str, Any]:
         str(poppler), "-f", "1", "-l", str(page_count), "-r", "96", "-jpeg",
         str(pdf), str(prefix),
     ], capture=True)
-    previews = sorted(destination.glob("slide-*.jpg"))
+    previews = sorted(destination.glob("slide-*.jpg"), key=lambda p: int(p.stem.split("-")[-1]))
     if len(previews) != page_count:
         raise RuntimeError(
             f"Preview page count mismatch: PDF={page_count}, previews={len(previews)}"
@@ -324,6 +362,10 @@ def preview_contact_sheet(pdf: Path, destination: Path) -> dict[str, Any]:
 def render_presentation(
     pptx: Path, *, overwrite: bool = False, preview: bool = False
 ) -> dict[str, Any]:
+    import pymupdf
+    import render_attestation as receipts
+    from qa_attestation import atomic_write, digest, validator_digest
+
     presentation = pptx.expanduser().resolve()
     if not presentation.is_file():
         raise FileNotFoundError(f"PowerPoint file not found: {presentation}")
@@ -332,24 +374,56 @@ def render_presentation(
         raise FileExistsError(
             f"Refusing to overwrite existing PDF: {output}. Pass --overwrite to replace it."
         )
-    soffice = find_binary("soffice")
-    if soffice is None:
-        raise RuntimeError("LibreOffice is unavailable; the verified editable PPTX remains usable.")
-    with tempfile.TemporaryDirectory(prefix="medical-journal-libreoffice-") as temporary:
-        profile = (Path(temporary) / "profile").as_uri()
-        run_checked([
-            str(soffice), f"-env:UserInstallation={profile}", "--headless", "--convert-to",
-            "pdf", "--outdir", str(presentation.parent), str(presentation),
-        ], capture=True)
-    if not output.is_file():
-        raise RuntimeError(f"LibreOffice did not create the expected PDF: {output}")
-    result: dict[str, Any] = {"pptx": str(presentation), "pdf": str(output)}
-    if preview:
-        preview_dir = (
-            presentation.parent / ".skill-work" / "previews" / safe_filename(presentation.stem)
-        )
-        result.update(preview_contact_sheet(output, preview_dir))
-    return result
+    path = receipts.receipt_path(presentation)
+    atomic_write(path, {**receipts.metadata(), "result": "in_progress"})
+    try:
+        initial = {"pptx_sha256": digest(presentation), "validator_sha256": validator_digest()}
+        soffice = find_binary("soffice")
+        if soffice is None:
+            raise RuntimeError("LibreOffice is unavailable; full rendered delivery is incomplete.")
+        # A fresh conversion directory prevents a zero-exit converter from reusing
+        # a stale sibling PDF. Keep the old deliverable until conversion succeeds.
+        with tempfile.TemporaryDirectory(prefix="medical-journal-libreoffice-") as temporary:
+            profile = (Path(temporary) / "profile").as_uri()
+            run_checked([
+                str(soffice), f"-env:UserInstallation={profile}", "--headless", "--convert-to",
+                "pdf", "--outdir", temporary, str(presentation),
+            ], capture=True)
+            converted = Path(temporary) / output.name
+            if not converted.is_file():
+                raise RuntimeError("LibreOffice did not create a fresh PDF.")
+            with pymupdf.open(converted) as document:
+                pages = len(document)
+            if pages <= 0 or pages != receipts.slide_count(presentation):
+                raise RuntimeError("Rendered PDF page count does not match PPTX slides.")
+            rendered_previews = {}
+            if preview:
+                parent = presentation.parent / ".skill-work" / "previews"
+                parent.mkdir(parents=True, exist_ok=True)
+                # Each generation owns an empty directory: stale/extra pages from
+                # a previous render can never enter its inventory.
+                preview_dir = Path(tempfile.mkdtemp(prefix="render-", dir=parent))
+                rendered_previews = preview_contact_sheet(converted, preview_dir)
+            if initial != {"pptx_sha256": digest(presentation), "validator_sha256": validator_digest()}:
+                raise RuntimeError("PPTX or validator changed during rendering; render again.")
+            # Copy beside destination first, then replace atomically across volumes.
+            descriptor, name = tempfile.mkstemp(prefix=".render-", suffix=".pdf", dir=output.parent)
+            os.close(descriptor)
+            staged = Path(name)
+            try:
+                shutil.copyfile(converted, staged)
+                staged.replace(output)
+            finally:
+                staged.unlink(missing_ok=True)
+        record = receipts.record_render(presentation, output, initial=initial, pages=pages,
+                                         previews=rendered_previews)
+        return {"pptx": str(presentation), "pdf": str(output), **rendered_previews,
+                "pdf_pages": pages, "preview_pages": record["preview_pages"],
+                "render_receipt": str(path), "render_receipt_sha256": digest(path),
+                "render_success": True, "visual_review": False, "delivery_ready": False}
+    except Exception:
+        atomic_write(path, {**receipts.metadata(), "result": "failed"})
+        raise
 
 
 def _synthetic_spec(asset: Path, *, mode: str, manifest: Path) -> dict[str, Any]:
@@ -430,7 +504,7 @@ def _synthetic_spec(asset: Path, *, mode: str, manifest: Path) -> dict[str, Any]
     }
 
 
-def smoke_test(*, workspace: Path, mode: str, style: str, keep: bool = False) -> dict[str, Any]:
+def smoke_test(*, workspace: Path, mode: str, style: str, keep: bool = False, render: bool = False) -> dict[str, Any]:
     import build_deck
     import image_polarity
     import qa_gate
@@ -495,8 +569,11 @@ def smoke_test(*, workspace: Path, mode: str, style: str, keep: bool = False) ->
         final = qa_gate.check_all(spec_path, output, mode=mode, style=style)
         if not final["ok"]:
             raise RuntimeError("Final QA failed: " + "; ".join(final["failures"]))
+        rendered = render_presentation(output, preview=True) if render else None
         return {
             "ok": True,
+            "render": rendered,
+            "output_pptx": str(output) if keep else None,
             "mode": mode,
             "style": style,
             "slides": built["slides"],
@@ -540,6 +617,8 @@ def parser() -> argparse.ArgumentParser:
     receipt = commands.add_parser("qa-status", help="Check whether the last local QA receipt is still current")
     receipt.add_argument("pptx", type=Path)
     receipt.add_argument("--spec", type=Path, required=True)
+    receipt.add_argument("--require-delivery", action="store_true",
+                         help="Require current automatic QA, complete render, and explicit approved visual review")
     builder = commands.add_parser("build", help="Run prebuild QA and build the selected style")
     builder.add_argument("spec", type=Path)
     builder.add_argument("--out", type=Path, required=True)
@@ -560,11 +639,16 @@ def parser() -> argparse.ArgumentParser:
         "--preview", action="store_true", help="Require Poppler previews and a contact sheet"
     )
     renderer.add_argument("--json", action="store_true")
+    review = commands.add_parser("visual-review", help="Record explicit review of an exact rendered snapshot")
+    review.add_argument("pptx", type=Path)
+    review.add_argument("--evidence", type=Path, required=True)
+    review.add_argument("--json", action="store_true")
     smoke = commands.add_parser("smoke-test", help="Run a synthetic end-to-end full-deck style test")
     smoke.add_argument("--workspace", type=Path, default=Path.cwd())
     smoke.add_argument("--mode", choices=tuple(MODES), default="full")
     smoke.add_argument("--style", choices=STYLES, default="standard")
     smoke.add_argument("--keep", action="store_true")
+    smoke.add_argument("--render", action="store_true", help="Render all slides; does not approve visual quality")
     smoke.add_argument("--json", action="store_true")
     return root
 
@@ -579,10 +663,17 @@ def emit(payload: dict[str, Any], *, as_json: bool) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "visual-review":
+        from render_attestation import record_review
+
+        report = record_review(args.pptx.expanduser().resolve(), args.evidence.expanduser().resolve())
+        emit(report, as_json=args.json)
+        return 0 if report["ok"] else 1
     if args.command == "qa-status":
         from qa_attestation import status
 
-        report = status(args.pptx.resolve(), args.spec.resolve(), mode=args.mode, style=args.style)
+        report = status(args.pptx.resolve(), args.spec.resolve(), mode=args.mode, style=args.style,
+                        require_delivery=args.require_delivery)
         emit(report, as_json=args.json)
         return 0 if report["ok"] else 1
     if args.command == "doctor":
@@ -666,7 +757,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     if args.command == "smoke-test":
-        emit(smoke_test(workspace=args.workspace, mode=args.mode, style=args.style, keep=args.keep), as_json=args.json)
+        emit(smoke_test(workspace=args.workspace, mode=args.mode, style=args.style, keep=args.keep, render=args.render), as_json=args.json)
         return 0
     return 2
 

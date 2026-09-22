@@ -52,14 +52,33 @@ class ReleaseVersionTests(unittest.TestCase):
             )
             self.assertEqual(history.read_text(encoding="utf-8"), "Historical v4.3.4\n")
             config = json.loads((root / ".classroom-project.json").read_text(encoding="utf-8"))
-            self.assertEqual(config["classroom_skill_version"], "v0.2.38-bg-aware-trim")
+            self.assertEqual(config["classroom_skill_version"], "v9.8.7")
             version.write_text("v9.8.7-local\n", encoding="utf-8")
-            self.assertEqual(release_version.metadata(root)["tag"], "v9.8.7")
+            with self.assertRaises(ValueError):
+                release_version.metadata(root)
+            (root / "VERSION").write_text("9.8.7-local\n", encoding="utf-8")
+            self.assertEqual(release_version.metadata(root)["tag"], "v9.8.7-local")
             release_version.synchronize(root, write=True)
             self.assertEqual(release_version.synchronize(root), [])
             version.write_text("not-a-version", encoding="utf-8")
             with self.assertRaises(ValueError):
                 release_version.metadata(root)
+
+    def test_prerelease_sync_preserves_archive_extensions_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("VERSION", ".classroom-project.json", *release_version.DOCUMENTS,
+                         ".agents/skills/medical-journal-to-pptx-integrated/SKILL.md",
+                         ".agents/skills/medical-journal-to-pptx-integrated/VERSION"):
+                dest = root / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / name, dest)
+            (root / "VERSION").write_text("4.7.0-rc.2\n")
+            (root / ".agents/skills/medical-journal-to-pptx-integrated/VERSION").write_text("v4.7.0-rc.2\n")
+            release_version.synchronize(root, write=True)
+            self.assertEqual(release_version.synchronize(root), [])
+            self.assertIn("v4.7.0-rc.2.zip.sha256", (root / "docs/GLOBAL-INSTALL.md").read_text())
+            self.assertEqual(release_version.metadata(root)["tag"], "v4.7.0-rc.2")
 
     def test_minimum_profile_pins_every_declared_dependency(self):
         self.assertEqual(minimum_constraints("# comment\nPillow>=10,<14\nnumpy>=1.26,<3\n"),

@@ -1177,14 +1177,32 @@ def _check_source_inventory_panels(
         return failures
     plan_path = resolve_asset(plan_value, spec_path)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    inventory = {
-        item["id"]: item["expected_labels"]
-        for item in plan.get("assets", [])
-        if isinstance(item, dict)
-        and item.get("export_image_panels") is True
-        and isinstance(item.get("id"), str)
-        and isinstance(item.get("expected_labels"), list)
-    }
+    if not isinstance(plan, dict) or not isinstance(plan.get("assets"), list) or not plan["assets"]:
+        return ["Native panel inventory plan must contain a non-empty asset list."]
+    inventory = {}
+    asset_plans = {}
+    ids = []
+    for item in plan["assets"]:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            return ["Native panel inventory has malformed assets."]
+        ids.append(item["id"])
+        if "export_image_panels" in item and not isinstance(item["export_image_panels"], bool):
+            return ["Native panel inventory export_image_panels must be a boolean."]
+        if item.get("export_image_panels") is not True:
+            continue
+        labels = item.get("expected_labels")
+        panels = item.get("panels")
+        if (item.get("type") != "figure" or not isinstance(labels, list) or not labels
+                or not all(isinstance(label, str) and re.fullmatch(r"[A-Za-z0-9]+", label) for label in labels)
+                or len(set(labels)) != len(labels) or not isinstance(panels, list)
+                or not all(isinstance(panel, dict) for panel in panels)
+                or [panel.get("label") for panel in panels] != labels):
+            return ["Native panel inventory labels/panels are malformed or out of order."]
+        inventory[item["id"]] = labels
+        asset_plans[item["id"]] = item
+    if (len(ids) != len(set(ids)) or not isinstance(plan.get("expected_assets"), list)
+            or sorted(ids) != sorted(plan["expected_assets"])):
+        return ["Native panel inventory asset IDs are duplicate or incomplete."]
     seen: set[str] = set()
     spec_slides = specification.get("slides", [])
     for index, (slide, slide_spec) in enumerate(
@@ -1202,14 +1220,40 @@ def _check_source_inventory_panels(
         labels = inventory.get(key)
         if not labels:
             continue
+        if key in seen:
+            failures.append(f"Source-inventory figure {key} appears on multiple slides.")
         seen.add(key)
         image_value = slide_spec.get("image")
         if not isinstance(image_value, str):
             failures.append(f"Slide {index}: source-inventory figure {key} has no image.")
             continue
         sidecar = read_sidecar(resolve_asset(image_value, spec_path)) or {}
+        if not isinstance(sidecar, dict):
+            failures.append(f"Slide {index}: invalid source-inventory sidecar.")
+            continue
+        inputs = sidecar.get("source_inputs")
+        bindings_valid = isinstance(inputs, list) and len(inputs) == len(labels)
+        if bindings_valid:
+            for source, label in zip(inputs, labels):
+                if not isinstance(source, str):
+                    bindings_valid = False
+                    break
+                source_path = Path(source).expanduser()
+                if not source_path.is_absolute():
+                    source_path = resolve_asset(image_value, spec_path).parent / source_path
+                crop = read_sidecar(source_path) or {}
+                if (not isinstance(crop, dict)
+                        or crop.get("command") != "source-coordinate-crop"
+                        or crop.get("plan") != asset_plans[key]
+                        or crop.get("source_sha256") != plan.get("source_sha256")
+                        or crop.get("dpi") != plan.get("dpi", 300)
+                        or crop.get("output_id") != key + "_" + label + "_image"):
+                    bindings_valid = False
+        if not bindings_valid:
+            failures.append(f"Slide {index}: compositor inputs do not match source inventory {key}.")
         geometry = sidecar.get("native_label_geometry") or sidecar.get("geometry") or []
-        if [entry.get("label") for entry in geometry if isinstance(entry, dict)] != labels:
+        if (not isinstance(geometry, list) or not all(isinstance(entry, dict) for entry in geometry)
+                or [entry.get("label") for entry in geometry] != labels):
             failures.append(f"Slide {index}: missing native panel geometry for {key}.")
             continue
         pictures = [
@@ -1242,6 +1286,12 @@ def _check_source_inventory_panels(
                     len(runs) == 1 and runs[0].font.size.pt == 18
                     and str(runs[0].font.color.rgb) == "8FA8C8"
                 )
+                if any(isinstance(geometry_item.get(field), bool)
+                       or not isinstance(geometry_item.get(field), (int, float))
+                       or not math.isfinite(geometry_item[field])
+                       or not 0 <= geometry_item[field] <= 1
+                       for field in ("fx_right", "fy_center")):
+                    raise ValueError("invalid native-label geometry")
                 expected_right = (
                     int(picture.left) + float(geometry_item["fx_right"]) * int(picture.width)
                     - 0.05 * 914400

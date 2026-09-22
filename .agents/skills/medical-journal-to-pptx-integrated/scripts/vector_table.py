@@ -54,7 +54,9 @@ def _bbox(value: Any) -> list[float] | None:
 
 
 def _resolve_soffice(explicit: str | Path | None = None) -> Path:
-    if explicit is None:
+    if explicit is None or str(explicit) == "soffice":
+        # Bare-name generation must use the same managed/override discovery as
+        # replay. PATH may name a different installed LibreOffice version.
         discovered = workflow.find_binary("soffice")
     else:
         raw = Path(explicit).expanduser()
@@ -107,7 +109,7 @@ def canonical_svg(
             f"vector-table padding values must be finite within 0..{MAX_PADDING_PT:g} points"
         )
 
-    if not isinstance(expected_text, (list, tuple)) or not all(
+    if not isinstance(expected_text, (list, tuple)) or not expected_text or not all(
         isinstance(value, str) and value.strip() for value in expected_text
     ):
         raise ValueError("vector-table expected_text must contain non-empty strings")
@@ -309,14 +311,13 @@ def sidecar_structure_failures(sidecar: dict[str, Any]) -> list[str]:
     ) is None:
         failures.append("vector sidecar requested/effective bbox metadata is malformed")
     expected_text = sidecar.get("expected_text")
-    if not isinstance(expected_text, list) or not all(
+    if not isinstance(expected_text, list) or not expected_text or not all(
         isinstance(value, str) and value.strip() for value in expected_text
     ):
         failures.append("vector sidecar expected_text must be a list of non-empty strings")
     if sidecar.get("padding_mode") != "blank_canvas":
         failures.append("vector sidecar padding_mode must be blank_canvas")
     padding = sidecar.get("padding_pt")
-    expected_text = sidecar.get("expected_text")
     if (
         not isinstance(padding, dict)
         or set(padding) != {"x", "top", "bottom"}
@@ -394,7 +395,7 @@ def replay_vector_table(
     expected_text = sidecar.get("expected_text")
     if requested is None or effective is None:
         failures.append(f"{prefix} has malformed requested/effective bbox metadata.")
-    if not isinstance(expected_text, list) or not all(
+    if not isinstance(expected_text, list) or not expected_text or not all(
         isinstance(value, str) and value.strip() for value in expected_text
     ):
         failures.append(f"{prefix} has malformed expected-text anchors.")

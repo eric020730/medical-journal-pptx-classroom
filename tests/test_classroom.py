@@ -21,15 +21,15 @@ import qa_check  # noqa: E402
 class ClassroomProjectTests(unittest.TestCase):
     def test_project_preserves_exact_classroom_skill_version(self) -> None:
         version = (classroom.SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
-        self.assertEqual(version, "v0.2.38-bg-aware-trim")
-        self.assertEqual(classroom.semantic_version(), "v0.2.38")
+        self.assertEqual(version, "v" + (PROJECT_ROOT / "VERSION").read_text().strip())
+        self.assertEqual(classroom.semantic_version(), version.split("-")[0])
 
     def test_classroom_skill_is_short_and_distinct(self) -> None:
         skill = (classroom.SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn('name: "medical-journal-to-pptx-classroom"', skill)
+        self.assertIn('name: medical-journal-to-pptx-integrated', skill)
         self.assertLess(len(skill.splitlines()), 180)
         self.assertTrue(
-            (classroom.SKILL_ROOT / "references" / "full_workflow_v0.2.38.md").is_file()
+            (classroom.SKILL_ROOT / "references" / "full_workflow.md").is_file()
         )
 
     def test_classroom_supports_and_defaults_to_full_presentation_mode(self) -> None:
@@ -52,7 +52,7 @@ class ClassroomProjectTests(unittest.TestCase):
     def test_release_filter_keeps_skill_and_excludes_private_artifacts(self) -> None:
         self.assertTrue(
             package_release.should_package(
-                Path(".agents/skills/medical-journal-to-pptx-classroom/SKILL.md")
+                Path(".agents/skills/medical-journal-to-pptx-integrated/SKILL.md")
             )
         )
         self.assertTrue(
@@ -89,7 +89,7 @@ class ClassroomProjectTests(unittest.TestCase):
                 self.assertTrue(
                     any(
                         name.endswith(
-                            "/.agents/skills/medical-journal-to-pptx-classroom/SKILL.md"
+                            "/.agents/skills/medical-journal-to-pptx-integrated/SKILL.md"
                         )
                         for name in names
                     )

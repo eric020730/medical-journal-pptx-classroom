@@ -632,6 +632,7 @@ def _provenance_paths(
     allow_document_terminal: bool = False,
     active: tuple[Path, ...] | None = None,
     validated: set[Path] | None = None,
+    crop_audit: dict[str, Any] | None = None,
 ) -> tuple[list[Path], list[str]]:
     """Return the complete provenance graph and fail closed on unsafe terminals.
 
@@ -645,6 +646,40 @@ def _provenance_paths(
     validated = set() if validated is None else validated
     trusted_documents = set() if trusted_documents is None else trusted_documents
     failures: list[str] = []
+    if sidecar.get("command") == "source-coordinate-crop":
+        from source_crops import replay_source_crop
+
+        failures.extend(replay_source_crop(asset, sidecar))
+        audit = crop_audit or {}
+        source = sidecar.get("source")
+        if (audit.get("ok") is not True or not isinstance(source, str)
+                or _resolve_path(source, asset.parent) not in trusted_documents
+                or sidecar.get("source_sha256") != audit.get("source_pdf_sha256")):
+            failures.append(f"Source crop {asset.name} requires the freshly audited source PDF/hash.")
+        plan = sidecar.get("plan", {})
+        if not isinstance(plan, dict):
+            return [], failures + [f"Source crop {asset.name} has an invalid plan."]
+        panels = plan.get("panels", [])
+        if not isinstance(panels, list) or not all(isinstance(p, dict) for p in panels):
+            return [], failures + [f"Source crop {asset.name} has invalid panels."]
+        pages = ([plan.get("page")] if plan.get("type") == "table"
+                 else [panel.get("page") for panel in panels])
+        references = audit.get("verified_references", [])
+        if not isinstance(references, list):
+            references = []
+        paths = []
+        for page in pages:
+            matched = [Path(ref["path"]).expanduser().resolve() for ref in references
+                       if isinstance(ref, dict) and ref.get("kind") == "page"
+                       and isinstance(ref.get("path"), str) and ref.get("page") == page]
+            if (not isinstance(page, int) or isinstance(page, bool)
+                    or len(matched) != 1 or matched[0] not in trusted):
+                failures.append(f"Source crop {asset.name} page {page!r} is not authenticated.")
+            else:
+                paths.extend(matched)
+        if not pages:
+            failures.append(f"Source crop {asset.name} has no authenticated pages.")
+        return list(dict.fromkeys(paths)), failures
     values: list[str] = []
     source = sidecar.get("source")
     if isinstance(source, str) and source.strip():
@@ -718,6 +753,7 @@ def _provenance_paths(
                 allow_document_terminal=allow_document_terminal,
                 active=(*active, path),
                 validated=validated,
+                crop_audit=crop_audit,
             )
             paths.extend(nested)
             failures.extend(errors)
@@ -861,6 +897,9 @@ def _decoded_rgb_equal(left: Path, right: Path) -> bool:
 def _deterministic_helper_evidence(asset: Path, sidecar: dict[str, Any]) -> tuple[bool, list[str]]:
     """Re-run supported single-source raster helpers and require exact decoded pixels."""
     command = sidecar.get("command")
+    if command == "source-coordinate-crop":
+        from source_crops import replay_source_crop
+        return True, replay_source_crop(asset, sidecar)
     if command not in {
         "trim", "labels", "panel-crop", "same-width", "split-table", "recompose-panels",
         "recompose-panels-aligned", "recompose-panels-banded", "crop-vector-figure",
@@ -1733,6 +1772,7 @@ def audit_final_assets(spec_path: Path, report: dict[str, Any]) -> dict[str, Any
             known_raw=known_raw,
             trusted_documents=trusted_documents,
             allow_document_terminal=allow_direct_pdf,
+            crop_audit=report,
         )
         failures.extend(f"Slide {index}: {failure}" for failure in provenance_failures)
         if mapped_entry is not None:

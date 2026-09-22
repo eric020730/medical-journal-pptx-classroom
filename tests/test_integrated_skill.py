@@ -53,7 +53,7 @@ def write_asset(root: Path, name: str, **kwargs: object) -> Path:
 def invoke(*arguments: object, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
     environment["PYTHONUTF8"] = "1"
-    environment.pop("MEDICAL_JOURNAL_PPTX_PYTHON", None)
+    environment["MEDICAL_JOURNAL_PPTX_PYTHON"] = sys.executable
     return subprocess.run(
         [sys.executable, *(str(argument) for argument in arguments)],
         cwd=cwd or PROJECT_ROOT,
@@ -82,7 +82,7 @@ class IntegratedSkillStructureTests(unittest.TestCase):
         self.assertIn("`full` is the only supported content mode", content)
         self.assertIn("--mode full", content)
         version = (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
-        self.assertRegex(version, r"^v\d+\.\d+\.\d+$")
+        self.assertRegex(version, r"^v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$")
         project = json.loads(
             (PROJECT_ROOT / ".classroom-project.json").read_text(encoding="utf-8")
         )
@@ -544,7 +544,7 @@ class FullDeckVisualStyleIntegrationTests(unittest.TestCase):
                 SKILL_RUNNER, "qa", output, "--spec", spec_path,
                 "--mode", "full", "--style", style, "--json",
             )
-            self.assertEqual(final.returncode, 0, msg=final.stderr)
+            self.assertEqual(final.returncode, 0, msg=final.stderr + final.stdout)
 
     def test_standard_preserves_emf_vector_table_on_white_card(self) -> None:
         self.check_emf_vector_table("standard")
@@ -917,7 +917,7 @@ class StandaloneReleaseTests(unittest.TestCase):
                 path.write_text(contents, encoding="utf-8")
             with mock.patch.object(package_release, "PROJECT_ROOT", root):
                 selected = package_release.release_files()
-            self.assertEqual(set(selected), {Path("README.md")})
+            self.assertEqual(set(selected), {Path("README.md"), Path(".agents/skills") / SKILL_NAME / "SKILL.md", Path(".agents/skills") / SKILL_NAME / "assets/dr_leether_logo.png"})
 
     def test_global_release_contains_full_skill_and_no_pdf_pptx_or_private_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -41,7 +41,7 @@ Key options
   --gap               inter-panel gutter in px (default 16)
   --asset-type        figure (16 px safety canvas) or clinical-image (0 px)
   --medical-image     compatibility alias for --asset-type clinical-image;
-                      requires active edge cleanup and keeps a 0 px outer canvas
+                      keeps residual-edge QA and a 0 px outer canvas
   --safety-margin-px  exact outer canvas margin in px; validated by asset type
   --source-label-policy  auto, preserve, or crop-safe-margin
   --max-edge-px       maximum removable white/gray rim depth per side (default 4)
@@ -1490,7 +1490,7 @@ def main():
     ap.add_argument(
         "--medical-image",
         action="store_true",
-        help="treat inputs as diagnostic images and require peripheral edge cleanup",
+        help="treat inputs as diagnostic images with peripheral edge QA",
     )
     ap.add_argument("--safety-margin-px", type=int, default=None,
                     help="exact outer canvas margin in px (default: 0 for "
@@ -1507,8 +1507,6 @@ def main():
     if a.medical_image:
         if a.asset_type != "figure":
             ap.error("--medical-image already selects the clinical-image asset type")
-        if a.no_trim:
-            ap.error("--medical-image cannot be combined with --no-trim")
         a.asset_type = "clinical-image"
 
     if a.cols is not None and not 1 <= a.cols <= len(a.inputs):

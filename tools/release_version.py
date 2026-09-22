@@ -15,8 +15,8 @@ DOCUMENTS = ("README.md", "docs/GLOBAL-INSTALL.md")
 
 def metadata(root: Path = ROOT) -> dict[str, str]:
     project_version = (root / "VERSION").read_text(encoding="utf-8").strip()
-    if not re.fullmatch(r"\d+\.\d+\.\d+", project_version):
-        raise ValueError("VERSION must contain one stable major.minor.patch version")
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?", project_version):
+        raise ValueError("VERSION must contain one semantic version")
     skill = root / ".agents" / "skills" / SKILL_NAME
     skill_version = (skill / "VERSION").read_text(encoding="utf-8").strip()
     if not SEMVER.fullmatch(skill_version):
@@ -24,7 +24,7 @@ def metadata(root: Path = ROOT) -> dict[str, str]:
     frontmatter = (skill / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1]
     if not re.search(rf"^name:\s*{SKILL_NAME}\s*$", frontmatter, re.MULTILINE):
         raise ValueError("Integrated skill identity does not match the release.")
-    semantic = re.match(r"v\d+\.\d+\.\d+", skill_version).group(0)
+    semantic = skill_version
     if semantic != f"v{project_version}":
         raise ValueError(
             f"Classroom VERSION {project_version} and integrated VERSION {skill_version} differ."
@@ -49,13 +49,20 @@ def synchronize(root: Path = ROOT, *, write: bool = False) -> list[str]:
         config["integrated_skill_name"] = SKILL_NAME
     if config.get("integrated_skill_version") != info["skill_version"]:
         config["integrated_skill_version"] = info["skill_version"]
+    config["skill_name"] = SKILL_NAME
+    config["classroom_skill_version"] = info["skill_version"]
     normalized_config = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
     if normalized_config != config_path.read_text(encoding="utf-8"):
         changes[config_path] = normalized_config
     for name in DOCUMENTS:
         path = root / name
+        # The student distribution deliberately omits the standalone install guide.
+        # Source checkouts must still contain it; only a shipped archive may omit it.
+        if (name == "docs/GLOBAL-INSTALL.md" and not path.exists()
+                and (root / "RELEASE-MANIFEST.txt").is_file()):
+            continue
         original = path.read_text(encoding="utf-8")
-        updated = SEMVER.sub(info["tag"], original)
+        updated = re.sub(r"v\d+\.\d+\.\d+(?:-[A-Za-z0-9-]+(?:\.(?!(?:zip|sha256)\b)[A-Za-z0-9-]+)*)?", info["tag"], original)
         if original != updated:
             changes[path] = updated
     if write:

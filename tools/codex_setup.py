@@ -21,14 +21,20 @@ IMPORTS = {
     "pdfplumber": "pdfplumber",
     "numpy": "numpy",
 }
-SKILL = Path(".agents/skills/medical-journal-to-pptx-classroom")
+SKILL = Path(".agents/skills/medical-journal-to-pptx-integrated")
 REQUIRED_SKILL_FILES = (
     "SKILL.md",
     "VERSION",
+    "scripts/run.py",
+    "scripts/workflow.py",
+    "scripts/qa_gate.py",
+    "scripts/qa_attestation.py",
+    "scripts/render_attestation.py",
     "scripts/build_deck.py",
     "scripts/extract_from_pdf.py",
     "scripts/quality_tools.py",
-    "references/full_workflow_v0.2.38.md",
+    "scripts/quality_tools_windows.py",
+    "references/full_workflow.md",
 )
 
 
@@ -93,6 +99,7 @@ def build_report(root: Path = ROOT) -> dict:
         "doctor_passed": False,
         "smoke_test": "not_run",
         "render_test": "not_run",
+        "visual_review": "not_attested",
     }
     if Path(sys.prefix).resolve() != (root / ".venv").resolve():
         result["issues"].append("wrong_python_environment")

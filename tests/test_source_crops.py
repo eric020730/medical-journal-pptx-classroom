@@ -12,7 +12,7 @@ import pymupdf as fitz
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / '.agents/skills/medical-journal-to-pptx-classroom/scripts'))
+sys.path.insert(0, str(ROOT / 'tests/fixtures/classroom_v46/scripts'))
 sys.path.insert(0, str(ROOT / 'tools'))
 import source_crops as crops
 import postprocess_assets as postprocess
@@ -146,7 +146,7 @@ class SourceCropTests(unittest.TestCase):
                 meta=json.loads(path.with_suffix('.png.postprocess.json').read_text())
                 self.assertEqual(meta['image_region']['original_panel'],label)
                 self.assertEqual(meta['margin'],0)
-        script=ROOT/'.agents/skills/medical-journal-to-pptx-classroom/scripts/recompose_panels_banded.py'
+        script=ROOT/'tests/fixtures/classroom_v46/scripts/recompose_panels_banded.py'
         subprocess.run([sys.executable,str(script),str(out/'final.png'),'--inputs',
                         str(out/'Figure_1_A_image.png'),str(out/'Figure_1_B_image.png'),
                         '--cols','2','--labels','A,B','--geometry',str(out/'geometry.json'),

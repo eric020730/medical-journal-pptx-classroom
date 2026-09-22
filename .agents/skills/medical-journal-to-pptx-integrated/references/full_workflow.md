@@ -14,7 +14,7 @@ particular repository, user account, cloud-storage provider, specialty, source
 article, or previously generated presentation.
 
 - Read only an article the user is authorized to provide.
-- Save final `.pptx` and optional `.pdf` files directly in the requested output
+- Save final `.pptx` and `.pdf` files directly in the requested output
   directory; avoid overwriting an unrelated presentation.
 - Store extracted images, source manifests, deck specifications, crop review,
   provenance sidecars, and QA reports in `.skill-work/<run-id>/`.
@@ -405,3 +405,5 @@ alone is not a full-quality completion.
 
 For precise script contracts, see
 [script-level quality expectations](script_quality_expectations.md).
+
+For delivery receipts and actual visual-review evidence, follow [rendered delivery verification](rendered_delivery.md). A render is not approval; require current automatic QA and reviewed render artifacts before final delivery.

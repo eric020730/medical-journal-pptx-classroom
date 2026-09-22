@@ -11,7 +11,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 LABELS = {
-    "Python 3.11-3.13", "Repository skill", "Classroom skill version",
+    "Python 3.11-3.13", "Project Python environment", "Repository skill", "Classroom skill version",
     "PyMuPDF", "python-pptx", "Pillow", "pdfplumber", "numpy",
     "Source papers", "Presentation outputs", "Private working files",
     "LibreOffice", "Poppler", "Codex desktop or CLI",
@@ -35,6 +35,28 @@ def run_json(arguments: list[str], timeout: int = 900) -> tuple[int, dict]:
         return proc.returncode, data if isinstance(data, dict) else {}
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return 1, {}
+
+
+def integrated_smoke_ready(smoke: dict) -> bool:
+    """A short/partial/one-style smoke cannot attest the full student workflow."""
+    styles = smoke.get("styles")
+    if not isinstance(styles, dict) or set(styles) != {"standard", "nice"}:
+        return False
+    for style, report in styles.items():
+        if not isinstance(report, dict):
+            return False
+        render = report.get("render")
+        if (report.get("ok") is not True or report.get("style") != style
+                or report.get("mode") != "full" or report.get("slides") != 40
+                or report.get("prebuild_qa") is not True
+                or report.get("postbuild_qa") is not True
+                or report.get("image_polarity") is not True
+                or report.get("qa_receipt_current") is not True
+                or report.get("artifacts_verified") is not True
+                or not isinstance(render, dict) or not render.get("pdf")
+                or not render.get("contact_sheet") or render.get("preview_pages") != 40):
+            return False
+    return True
 
 
 def collect_report() -> dict:
@@ -70,16 +92,19 @@ def collect_report() -> dict:
             and bool(render.get("pdf"))
             and bool(render.get("contact_sheet"))
         )
-        smoke_ok = smoke_code == 0 and smoke.get("ok") is True and render_artifacts
+        smoke_ok = smoke_code == 0 and smoke.get("ok") is True and render_artifacts and integrated_smoke_ready(smoke)
         render_ok = smoke_ok
 
     full_ready = doctor_ok and native_ok and smoke_ok and render_ok
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "checked_at_utc": datetime.now(timezone.utc).isoformat(),
         "project_version": (ROOT / "VERSION").read_text(encoding="utf-8").strip(),
         "local_status": "FULL_QA_READY" if full_ready else "LOCAL_BLOCKED",
         "doctor_passed": doctor_ok and native_ok,
+        "integrated_styles": ["standard", "nice"] if smoke_ok else [],
+        "slides_per_style": 40 if smoke_ok else None,
+        "visual_review": "not_attested",
         "smoke_test": "passed" if smoke_ok else (
             "failed" if doctor_ok and native_ok else "not_run"
         ),

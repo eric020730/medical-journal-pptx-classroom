@@ -9,7 +9,7 @@ $SavedEnv = @{}
 $Names = @(
     'UV_CACHE_DIR','UV_PYTHON_INSTALL_DIR','UV_PYTHON_BIN_DIR','UV_TOOL_DIR','UV_TOOL_BIN_DIR',
     'UV_PYTHON_PREFERENCE','UV_PYTHON_INSTALL_REGISTRY','UV_PYTHON_INSTALL_BIN','UV_NO_CONFIG',
-    'PYTHONUTF8','PIXI_HOME','PIXI_CACHE_DIR','PIXI_NO_PATH_UPDATE','PIXI_COLOR','PIXI_NO_PROGRESS','PATH'
+    'PYTHONUTF8','PYTHONHOME','PYTHONPATH','PYTHONNOUSERSITE','PIXI_HOME','PIXI_CACHE_DIR','PIXI_NO_PATH_UPDATE','PIXI_COLOR','PIXI_NO_PROGRESS','PATH'
 )
 foreach ($Name in $Names) { $SavedEnv[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process') }
 function Assert-Exit([string]$Step) {
@@ -21,6 +21,9 @@ function Set-QualityPath {
     $env:PIXI_NO_PATH_UPDATE = '1'
     $env:PIXI_COLOR = 'never'
     $env:PIXI_NO_PROGRESS = 'true'
+    $env:PYTHONHOME = $null
+    $env:PYTHONPATH = $null
+    $env:PYTHONNOUSERSITE = '1'
     $env:PYTHONUTF8 = '1'
     $QualityPaths = @(
         (Join-Path $Root '.bootstrap\pixi-home\bin'),
@@ -41,7 +44,7 @@ try {
         }
     }
     $Python = Join-Path $Root '.venv\Scripts\python.exe'
-    $Quality = Join-Path $Root '.agents\skills\medical-journal-to-pptx-classroom\scripts\quality_tools_windows.py'
+    $Quality = Join-Path $Root '.agents\skills\medical-journal-to-pptx-integrated\scripts\quality_tools_windows.py'
     Set-QualityPath
 
     if ($CheckOnly) {

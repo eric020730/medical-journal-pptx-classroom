@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -138,6 +139,92 @@ class BuildBindingTests(unittest.TestCase):
         )
         self.assertFalse(wrong_spec["ok"])
         self.assertTrue(any("canonical spec SHA-256 mismatch" in item for item in wrong_spec["failures"]))
+
+    def test_crop_plan_binding_preserves_existing_dependencies_and_spec_semantics(self) -> None:
+        spec = valid_spec()
+        spec_path = self.write_spec(spec)
+        plain = build_deck.make_spec_binding(spec, spec_path)
+        self.assertNotIn("external_bindings", plain)
+
+        mapping = self.root / "asset-map.json"
+        mapping.write_text('{"review": "original map"}', encoding="utf-8")
+        spec["meta"]["article_asset_map"] = mapping.name
+        mapped = build_deck.make_spec_binding(spec, spec_path)
+        expected_map = {
+            "path": str(mapping.resolve()),
+            "sha256": hashlib.sha256(mapping.read_bytes()).hexdigest(),
+        }
+        self.assertEqual(mapped["external_bindings"], {"article_asset_map": expected_map})
+
+        plan = self.root / "review" / "plan.json"
+        plan.parent.mkdir()
+        plan.write_text('{"review": "original plan"}', encoding="utf-8")
+        spec["meta"]["panel_crop_plan"] = "review/plan.json"
+        bound = build_deck.make_spec_binding(spec, spec_path)
+        self.assertEqual(bound["external_bindings"], {
+            "article_asset_map": expected_map,
+            "panel_crop_plan": {
+                "path": str(plan.resolve()),
+                "sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+            },
+        })
+        self.assertEqual(bound["slides"], plain["slides"])
+        reordered = json.loads(json.dumps(spec, sort_keys=True, indent=4))
+        self.assertEqual(build_deck.make_spec_binding(reordered, spec_path), bound)
+
+        plan.write_text('{"review": "changed plan"}', encoding="utf-8")
+        changed = build_deck.make_spec_binding(spec, spec_path)
+        self.assertEqual(changed["spec_sha256"], bound["spec_sha256"])
+        self.assertEqual(changed["slides"], bound["slides"])
+        self.assertEqual(changed["external_bindings"]["article_asset_map"], expected_map)
+        self.assertNotEqual(changed["external_bindings"]["panel_crop_plan"],
+                            bound["external_bindings"]["panel_crop_plan"])
+        mapping.write_text('{"review": "changed map"}', encoding="utf-8")
+        changed_map = build_deck.make_spec_binding(spec, spec_path)
+        self.assertNotEqual(changed_map["external_bindings"]["article_asset_map"], expected_map)
+        self.assertEqual(changed_map["external_bindings"]["panel_crop_plan"],
+                         changed["external_bindings"]["panel_crop_plan"])
+
+    def test_crop_plan_mutation_after_build_fails_canonical_qa_in_both_styles(self) -> None:
+        plan = self.root / "plan.json"
+        original = json.dumps({"expected_assets": ["Table_1"], "assets": [
+            {"id": "Table_1", "type": "table", "page": 1,
+             "bbox": [10, 10, 100, 100], "expected_text": ["Reviewed header"]}
+        ]})
+        spec = valid_spec()
+        spec["meta"]["panel_crop_plan"] = plan.name
+        spec_path = self.write_spec(spec)
+        for style in ("standard", "nice"):
+            with self.subTest(style=style):
+                plan.write_text(original, encoding="utf-8")
+                deck = self.root / f"crop-plan-{style}.pptx"
+                build_deck.build(spec_path, deck, style=style)
+                report = qa_check.validate_presentation(deck, spec_path=spec_path, style=style)
+                self.assertTrue(report["ok"], report["failures"])
+                deck_digest = hashlib.sha256(deck.read_bytes()).hexdigest()
+                changed = json.loads(original)
+                changed["assets"][0]["expected_text"] = ["Unreviewed replacement"]
+                plan.write_text(json.dumps(changed), encoding="utf-8")
+                report = qa_check.validate_presentation(deck, spec_path=spec_path, style=style)
+                self.assertFalse(report["ok"])
+                self.assertTrue(any("binding does not match" in failure
+                                    for failure in report["failures"]), report["failures"])
+                self.assertEqual(hashlib.sha256(deck.read_bytes()).hexdigest(), deck_digest)
+                plan.write_text(original, encoding="utf-8")
+                report = qa_check.validate_presentation(deck, spec_path=spec_path, style=style)
+                self.assertTrue(report["ok"], report["failures"])
+
+    def test_crop_plan_binding_rejects_missing_and_invalid_declared_paths(self) -> None:
+        spec = valid_spec()
+        spec_path = self.write_spec(spec)
+        for value in (None, "", "  ", False, [], {}):
+            with self.subTest(value=value):
+                spec["meta"]["panel_crop_plan"] = value
+                with self.assertRaisesRegex(TypeError, "panel_crop_plan"):
+                    build_deck.make_spec_binding(spec, spec_path)
+        spec["meta"]["panel_crop_plan"] = "missing-plan.json"
+        with self.assertRaises(FileNotFoundError):
+            build_deck.make_spec_binding(spec, spec_path)
 
     def test_post_build_visible_edit_is_detected(self) -> None:
         spec_path = self.write_spec(valid_spec())

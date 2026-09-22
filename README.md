@@ -29,7 +29,7 @@ PDF 匯出與全頁 preview 檢查。請見 [全域安裝說明](docs/GLOBAL-INS
 
 只有網址不代表已授權執行軟體；尚無安裝意圖時只確認一次。已有明確安裝要求時不要重問。一般聊天、遠端 Cloud 或只有 GitHub connector 都不等於能修改學生電腦，必須先使用 Local workspace。
 
-本流程固定本次 `main` commit，再取得完整 repository。Skill 位於 `.agents/skills/medical-journal-to-pptx-classroom/`，只作用於目前專案；Codex 必須實際讀取完整 `SKILL.md`。
+本流程固定本次 `main` commit，再取得完整 repository。Skill 位於 `.agents/skills/medical-journal-to-pptx-integrated/`，只作用於目前專案；Codex 必須實際讀取完整 `SKILL.md`。
 
 ## 完整品質門檻
 
@@ -45,7 +45,7 @@ PDF 匯出與全頁 preview 檢查。請見 [全域安裝說明](docs/GLOBAL-INS
 
 ## 會得到什麼
 
-預設產出 **40–55 張英文投影片、每頁繁體中文講者備註、原文 Figures／Tables、建檔前後 QA、PDF 與 slide preview**。最終檔案放在 `outputs/`，中間素材與證據放在 `.skill-work/`。
+預設產出 **40–55 張英文投影片、每頁繁體中文講者備註、原文 Figures／Tables、來源／備註／成品一致性 QA、PDF、slide preview 與逐頁視覺驗收**。最終檔案放在 `outputs/`，中間素材與證據放在 `.skill-work/`。
 
 工具通過不能保證內容完全正確；完成後仍須人工對照原文及檢視渲染頁面。不捏造原文沒有的數值、作者或結論。
 
@@ -54,3 +54,9 @@ PDF 匯出與全頁 preview 檢查。請見 [全域安裝說明](docs/GLOBAL-INS
 第一次安裝需要網路與足夠磁碟空間，也會消耗 Codex 額度；不需要 OpenAI API key，不使用 AI 生圖。論文內容會交由模型理解，不能宣稱全文完全離線。只處理獲准使用的論文，不把 PDF、成品、病人個資或帳密提交至 GitHub。
 
 必要文件：[Codex 操作流程](CODEX-START.md) · [問題處理](docs/TROUBLESHOOTING.md) · [隱私](docs/PRIVACY.md) · [授權責任](NOTICE.md)
+
+## 整合版本
+
+課堂網址流程與個人安裝使用同一份 integrated 核心。保留 standard／nice、圖表來源與接縫驗證、備註品質、成品重新建置比對及 QA 收據，並保留完整環境安裝和渲染實測。學生無須選擇技能或安裝模式。
+
+本分支為整合候選版，發布前仍需完成跨平台新環境驗收。安裝成功、成品自動 QA 通過、逐頁視覺驗收是分開的狀態；只有三者皆完成才宣告完整交付。

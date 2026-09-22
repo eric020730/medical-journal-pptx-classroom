@@ -19,7 +19,7 @@ SKILL_SCRIPTS = (
     ROOT
     / ".agents"
     / "skills"
-    / "medical-journal-to-pptx-classroom"
+    / "medical-journal-to-pptx-integrated"
     / "scripts"
 )
 QUALITY_PATH = SKILL_SCRIPTS / "quality_tools.py"
@@ -149,8 +149,8 @@ class DistributionTests(unittest.TestCase):
             "setup-codex.sh",
             "setup-codex.ps1",
             "tools/codex_setup.py",
-            ".agents/skills/medical-journal-to-pptx-classroom/scripts/quality_tools.py",
-            ".agents/skills/medical-journal-to-pptx-classroom/scripts/quality_tools_windows.py",
+            ".agents/skills/medical-journal-to-pptx-integrated/scripts/quality_tools.py",
+            ".agents/skills/medical-journal-to-pptx-integrated/scripts/quality_tools_windows.py",
         ):
             self.assertTrue(should_package(Path(path)), path)
 

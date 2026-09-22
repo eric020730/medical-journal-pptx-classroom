@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import os
 import platform
@@ -44,8 +45,8 @@ def current_environment_ready() -> bool:
     return all(importlib.util.find_spec(name) is not None for name in REQUIRED_IMPORTS)
 
 
-def choose_python() -> Path:
-    override = os.environ.get("MEDICAL_JOURNAL_PPTX_PYTHON")
+def choose_python(explicit: str | None = None) -> Path:
+    override = explicit or os.environ.get("MEDICAL_JOURNAL_PPTX_PYTHON")
     if override:
         # Do not resolve a virtualenv's executable symlink: its original path
         # is how Python discovers pyvenv.cfg and the environment's packages.
@@ -68,8 +69,11 @@ def choose_python() -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    runtime = argparse.ArgumentParser(add_help=False)
+    runtime.add_argument("--runtime-python")
+    selected, arguments = runtime.parse_known_args(arguments)
     try:
-        executable = choose_python()
+        executable = choose_python(selected.runtime_python)
     except RuntimeError:
         # The doctor command itself uses only the standard library and should
         # remain available specifically when dependencies are missing.

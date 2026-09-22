@@ -15,9 +15,9 @@ from PIL import Image, ImageDraw, ImageOps
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_SCRIPTS = (
     PROJECT_ROOT
-    / ".agents"
-    / "skills"
-    / "medical-journal-to-pptx-classroom"
+    / "tests"
+    / "fixtures"
+    / "classroom_v46"
     / "scripts"
 )
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))

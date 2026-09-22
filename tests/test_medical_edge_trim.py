@@ -2,7 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 from PIL import Image
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'.agents/skills/medical-journal-to-pptx-classroom/scripts'))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tests/fixtures/classroom_v46/scripts'))
 from recompose_panels_banded import trim
 
 class MedicalTrimTests(unittest.TestCase):

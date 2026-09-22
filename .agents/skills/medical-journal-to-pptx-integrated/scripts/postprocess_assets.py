@@ -2263,7 +2263,7 @@ def main() -> None:
     )
     vt.add_argument("--pad-top", type=float, default=6.0)
     vt.add_argument("--pad-bottom", type=float, default=10.0)
-    vt.add_argument("--soffice", default="soffice", help="LibreOffice binary")
+    vt.add_argument("--soffice", default=None, help="LibreOffice binary (default: project-managed runtime)")
     vt.set_defaults(func=vector_table_command)
 
     notes = sub.add_parser("notes-audit")
