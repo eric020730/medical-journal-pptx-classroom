@@ -9,6 +9,10 @@ if [[ ! -x "${PROJECT_PYTHON}" ]]; then
   exit 1
 fi
 
+unset PYTHONHOME PYTHONPATH
+export PYTHONNOUSERSITE=1
+export MEDICAL_JOURNAL_PPTX_PYTHON="${PROJECT_PYTHON}"
+export MEDICAL_JOURNAL_PPTX_RUNTIME="${PROJECT_ROOT}/.venv"
 export PIXI_HOME="${PROJECT_ROOT}/.bootstrap/pixi-home"
 export PIXI_CACHE_DIR="${PROJECT_ROOT}/.bootstrap/pixi-cache"
 export PIXI_NO_PATH_UPDATE=1

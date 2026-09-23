@@ -15,9 +15,9 @@ from PIL import Image, ImageDraw, ImageOps
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_SCRIPTS = (
     PROJECT_ROOT
-    / ".agents"
-    / "skills"
-    / "medical-journal-to-pptx-classroom"
+    / "tests"
+    / "fixtures"
+    / "classroom_v46"
     / "scripts"
 )
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
@@ -36,7 +36,10 @@ def patterned_image() -> Image.Image:
     return image
 
 
-def write_asset(root: Path, name: str, *, width: int = 220, **sidecar: object) -> Path:
+def write_asset(
+    root: Path, name: str, *, width: int = 220,
+    skill_scripts: Path = SKILL_SCRIPTS, **sidecar: object
+) -> Path:
     directory = root / "final_assets"
     directory.mkdir(exist_ok=True)
     path = directory / name
@@ -48,7 +51,7 @@ def write_asset(root: Path, name: str, *, width: int = 220, **sidecar: object) -
     if isinstance(source, str) and Path(source).suffix.lower() != ".pdf":
         command = [
             sys.executable,
-            str(SKILL_SCRIPTS / "postprocess_assets.py"),
+            str(skill_scripts / "postprocess_assets.py"),
             "trim",
             source,
             str(path),
@@ -67,10 +70,13 @@ def write_asset(root: Path, name: str, *, width: int = 220, **sidecar: object) -
         return path
     if isinstance(source_inputs, list) and source_inputs:
         if len(source_inputs) == 1:
-            return write_asset(root, name, width=width, source=source_inputs[0], **sidecar)
+            return write_asset(
+                root, name, width=width, source=source_inputs[0],
+                skill_scripts=skill_scripts, **sidecar
+            )
         command = [
             sys.executable,
-            str(SKILL_SCRIPTS / "postprocess_assets.py"),
+            str(skill_scripts / "postprocess_assets.py"),
             "recompose-panels",
             str(path),
             "--inputs",
@@ -215,7 +221,8 @@ def add_figure(
 
 
 def create_synthetic_inversion_fixture(
-    root: Path, *, source_size: tuple[int, int] | None = None, source_format: str = "JPEG"
+    root: Path, *, source_size: tuple[int, int] | None = None, source_format: str = "JPEG",
+    skill_scripts: Path = SKILL_SCRIPTS,
 ) -> tuple[Path, Path, Path]:
     source_pdf = root / "synthetic-inverted-image.pdf"
     source = patterned_image()
@@ -229,6 +236,7 @@ def create_synthetic_inversion_fixture(
     rectangle = pymupdf.Rect(30, 30, 250, 210)
     xref = page.insert_image(rectangle, stream=stream.getvalue())
     document.xref_set_key(xref, "Decode", "[1 0]")
+    page.insert_text((40, 225), "TABLE 1", fontsize=10)
     document.save(source_pdf)
     document.close()
 
@@ -236,7 +244,7 @@ def create_synthetic_inversion_fixture(
     result = subprocess.run(
         [
             sys.executable,
-            str(SKILL_SCRIPTS / "extract_from_pdf.py"),
+            str(skill_scripts / "extract_from_pdf.py"),
             str(source_pdf),
             "--out",
             str(extracted),

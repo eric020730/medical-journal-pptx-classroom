@@ -9,6 +9,11 @@ if not exist "%PROJECT_PYTHON%" (
   exit /b 1
 )
 
+set "PYTHONHOME="
+set "PYTHONPATH="
+set "PYTHONNOUSERSITE=1"
+set "MEDICAL_JOURNAL_PPTX_PYTHON=%PROJECT_PYTHON%"
+set "MEDICAL_JOURNAL_PPTX_RUNTIME=%PROJECT_ROOT%.venv"
 set "PIXI_HOME=%PROJECT_ROOT%.bootstrap\pixi-home"
 set "PIXI_CACHE_DIR=%PROJECT_ROOT%.bootstrap\pixi-cache"
 set "PIXI_NO_PATH_UPDATE=1"

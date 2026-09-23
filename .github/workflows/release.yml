@@ -1,0 +1,50 @@
+name: Publish a verified integrated skill release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Require the tag and current guides to match VERSION
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python tools/release_version.py --tag "$RELEASE_TAG"
+
+  checks:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: [version, checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt
+      - name: Build the privacy-safe skill ZIP and SHA-256
+        run: |
+          python tools/classroom.py demo
+          python tools/package_release.py --kind classroom
+          python tools/package_release.py --kind skill
+      - name: Publish the verified tag without replacing historical assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          extra=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then extra+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" dist/*.zip dist/*.sha256 --verify-tag --generate-notes --title "Integrated skill $RELEASE_TAG" "${extra[@]}"

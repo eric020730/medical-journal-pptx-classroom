@@ -31,7 +31,14 @@ def doctor(*, quality_ok=True, ok=True):
 
 
 def rendered_smoke(*, ok=True, rendered=True):
-    payload = {"ok": ok}
+    payload = {"ok": ok, "styles": {
+        style: {"ok": ok, "mode": "full", "style": style, "slides": 40,
+                "prebuild_qa": True, "postbuild_qa": True, "image_polarity": True,
+                "qa_receipt_current": True, "artifacts_verified": True,
+                "render": {"pdf": "PRIVATE.pdf", "contact_sheet": "PRIVATE.jpg",
+                           "preview_pages": 40} if rendered else {}}
+        for style in ("standard", "nice")
+    }}
     if rendered:
         payload["render"] = {
             "pdf": "PRIVATE_DEMO.pdf",

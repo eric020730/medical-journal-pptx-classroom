@@ -6,7 +6,7 @@
 
 1. 開啟支援本機執行的 Codex，選擇可寫入的空白 Local 資料夾。Windows 使用原生 Windows，不臨時切換 WSL。
 2. 貼上本專案 GitHub 首頁網址。只有網址且尚未表明安裝意圖時，Codex 用一句話確認；已有明確要求就直接執行。只批准這個專案必要的下載與執行，不提供帳密、API key 或全面存取權。
-3. Codex 宣告完整品質環境通過後，附加論文 PDF 或提供可讀取的本機路徑；收到檔案後直接接續製作。
+3. Codex 宣告完整品質環境通過後，附加論文 PDF 或提供可讀取的本機路徑；收到檔案後直接接續製作。已在課堂指示中表明安裝意圖時，不再追加確認。
 
 預設成果：40–55 張英文投影片、繁體中文逐頁講稿、原文 Figures／Tables、雙階段 QA、PDF 與 slide preview，輸出至 `outputs/`。
 
@@ -20,7 +20,7 @@
 
 若使用者只有貼網址，先問：「要在目前本機資料夾安裝這個論文轉簡報工具嗎？完成完整渲染測試後我會請你提供 PDF。」已有明確安裝要求時不重複詢問。
 
-一般專案首頁先解析 `main` 的完整 commit SHA，固定本次版本後下載完整 repository；不要只複製 `SKILL.md`，不要使用歷史 Release。Git 不存在時可使用 codeload ZIP。空白 workspace 將內容放在根目錄；若已有其他內容、舊版或同名檔案，不得直接覆蓋或清空。
+一般專案首頁先解析 `main` 的完整 commit SHA，固定本次版本後下載完整 repository；不要只複製 `SKILL.md`，不要混用其他版本的檔案；指定版本網址必須保留其版本，不改抓 main。Git 不存在時可使用 codeload ZIP。空白 workspace 將內容放在根目錄；若已有其他內容、舊版或同名檔案，不得直接覆蓋或清空。
 
 下載後依序讀取本機 `AGENTS.md`、本文件、對應 setup script 與 `tools/codex_setup.py`。
 
@@ -69,8 +69,10 @@ FULL_QA_READY_SKILL_PENDING
 實際讀取完整檔案：
 
 ```text
-.agents/skills/medical-journal-to-pptx-classroom/SKILL.md
+.agents/skills/medical-journal-to-pptx-integrated/SKILL.md
 ```
+
+同時讀取旁邊的 `VERSION`。預設 standard，只有學生要求時才改 nice，不用先詢問版型。
 
 Skill 已隨 repository 存在，不需安裝到全域位置。選單未刷新時仍可直接讀取完整 `SKILL.md`；檔案存在或 setup 通過不能假稱模型已讀取。
 
@@ -88,7 +90,11 @@ Skill 已隨 repository 存在，不需安裝到全域位置。選單未刷新�
 
 1. 通過 spec QA 與 PPTX QA。
 2. 以 `journal render <pptx> --preview`（Windows 用 `journal.cmd`）實際產生 PDF 與 preview。
-3. 檢視渲染頁面，修正可見跑版、截字、圖表裁切或不可讀問題，再重新 QA/render。
+3. 檢視每一頁渲染結果，逐一對照原文 Figure/Table，確認 panel、表頭、末列、註腳完整，修正跑版、截字與不可讀問題，再重新 QA/render。
+4. 依 skill 的視覺驗收說明，記錄目前 render snapshot、已檢視頁碼、原文圖表核對與發現事項；實際完成檢視後才呼叫 `journal visual-review`。
+5. 執行 `journal qa-status <pptx> --spec <spec.json> --style <standard|nice> --require-delivery`，完整交付狀態必須通過。只有 render 成功不能代替視覺檢視。
+
+不得改用 historical classroom fixture 的 builder 或 QA。`journal` 必須使用 integrated 核心，保留來源 caption 綁定、接縫證據、備註品質與 canonical rebuild。
 
 渲染或檢視未完成時，不得宣稱達到本技能完整品質標準。
 

@@ -56,21 +56,28 @@ PUBLIC_ROOT_FILES = {
     ".classroom-project.json", ".gitattributes", ".gitignore", "AGENTS.md",
     "NOTICE.md", "README.md", "CODEX-START.md", "VERSION", "journal", "journal.cmd",
     "requirements.txt", "setup-codex.sh", "setup-codex.ps1",
+    "install-global.py", "install-global.sh", "install-global.ps1", "install-global.cmd",
 }
-PUBLIC_DOCUMENTS = {"PRIVACY.md", "TROUBLESHOOTING.md"}
+PUBLIC_DOCUMENTS = {"PRIVACY.md", "TROUBLESHOOTING.md", "GLOBAL-INSTALL.md"}
 PUBLIC_TOOLS = {
-    "classroom.py", "image_polarity.py", "make_demo_paper.py", "package_release.py",
-    "qa_check.py", "release_version.py", "classroom_preflight.py", "codex_setup.py",
+    "classroom.py", "make_demo_paper.py", "package_release.py",
+    "release_version.py", "classroom_preflight.py", "codex_setup.py",
+    "check_clean_install.py",
 }
 PUBLIC_TESTS = {
     "test_advanced_qa.py", "test_classroom.py", "test_classroom_teaching.py",
-    "test_codex_setup.py", "test_single_workflow.py",
+    "test_codex_setup.py", "test_single_workflow.py", "test_integrated_skill.py",
+    "test_release_reliability.py", "test_source_crops.py", "test_native_panel_qa.py",
+    "test_medical_edge_trim.py",
 }
 PUBLIC_GITHUB_FILES = {
     ".github/ISSUE_TEMPLATE/environment-report.yml", ".github/dependabot.yml",
     ".github/pull_request_template.md", ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
 }
-PUBLIC_SKILL_NAMES = {"medical-journal-to-pptx-classroom"}
+PUBLIC_SKILL_NAMES = {
+    "medical-journal-to-pptx-integrated",
+}
 
 
 def is_public_skill_file(relative: Path) -> bool:
@@ -129,11 +136,25 @@ def should_package(relative: Path) -> bool:
 
 
 def release_files() -> list[Path]:
+    """List the beginner classroom ZIP; the global skill has its own archive."""
     files: list[Path] = []
     for path in PROJECT_ROOT.rglob("*"):
         if path.is_symlink() or not path.is_file():
             continue
         relative = path.relative_to(PROJECT_ROOT)
+        if (
+            relative.name.startswith("install-global")
+            or relative == Path("docs/GLOBAL-INSTALL.md")
+            or relative == Path("tools/check_clean_install.py")
+            or relative in {
+                Path("tests/test_integrated_skill.py"),
+                Path("tests/test_release_reliability.py"),
+                Path(".github/workflows/release.yml"),
+            }
+        ):
+            continue
+        if relative.parts[:1] == ("tests",):
+            continue
         if should_package(relative):
             files.append(relative)
     return sorted(files, key=lambda value: value.as_posix())
@@ -145,7 +166,7 @@ def validate_release_files(files: list[Path]) -> None:
             "README.md", "AGENTS.md", "CODEX-START.md", "VERSION",
             "setup-codex.sh", "setup-codex.ps1", "tools/codex_setup.py",
             "tools/classroom_preflight.py", "requirements.txt",
-            ".agents/skills/medical-journal-to-pptx-classroom/SKILL.md",
+            ".agents/skills/medical-journal-to-pptx-integrated/SKILL.md",
             "sample-papers/classroom-demo-paper.pdf",
         )
     }
@@ -234,6 +255,86 @@ def create_release(destination: Path | None = None) -> dict[str, Any]:
     }
 
 
+def integrated_skill_files() -> list[tuple[Path, str]]:
+    """List only the self-contained skill and standalone installation files."""
+    skill_name = "medical-journal-to-pptx-integrated"
+    skill_root = PROJECT_ROOT / ".agents" / "skills" / skill_name
+    files: list[tuple[Path, str]] = []
+    for path in skill_root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(PROJECT_ROOT)
+        if should_package(relative) and is_public_skill_file(relative):
+            files.append((relative, f"skill/{path.relative_to(skill_root).as_posix()}"))
+    for relative in (
+        Path("install-global.py"), Path("install-global.sh"),
+        Path("install-global.ps1"), Path("install-global.cmd"),
+        Path("docs/GLOBAL-INSTALL.md"), Path("NOTICE.md"),
+    ):
+        if not (PROJECT_ROOT / relative).is_file():
+            raise RuntimeError(f"Integrated skill release is incomplete; missing: {relative}")
+        files.append((relative, relative.as_posix()))
+    return sorted(files, key=lambda entry: entry[1])
+
+
+def create_skill_release(destination: Path | None = None) -> dict[str, Any]:
+    """Build a deterministic skill-only ZIP without papers, decks, or run data."""
+    assert_versions_current()
+    info = metadata(PROJECT_ROOT)
+    skill_name = "medical-journal-to-pptx-integrated"
+    archive_root = f"{skill_name}-{info['tag']}"
+    destination = (
+        PROJECT_ROOT / "dist" / f"{archive_root}.zip"
+        if destination is None else destination.expanduser().absolute()
+    )
+    if destination.suffix.lower() != ".zip":
+        destination = destination.with_suffix(".zip")
+    files = integrated_skill_files()
+    required = {
+        "skill/SKILL.md", "skill/VERSION", "install-global.py",
+        "install-global.sh", "install-global.ps1",
+    }
+    missing = sorted(required.difference(name for _, name in files))
+    if missing:
+        raise RuntimeError("Integrated skill release is incomplete: " + ", ".join(missing))
+    personal_home = str(Path.home()).encode("utf-8")
+    for relative, archive_name in files:
+        if Path(archive_name).suffix.lower() in {".pdf", ".pptx"}:
+            raise RuntimeError(f"Private paper or deck cannot enter a skill release: {relative}")
+        if relative.suffix.lower() in TEXT_SUFFIXES:
+            data = (PROJECT_ROOT / relative).read_bytes()
+            if personal_home in data or PERSONAL_PATH_RE.search(data):
+                raise RuntimeError(f"Personal absolute directory found in release file: {relative}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.unlink(missing_ok=True)
+    manifest_lines = [
+        "Medical Journal PPTX Integrated skill release manifest",
+        f"Integrated skill version: {info['skill_version']}", "", "SHA256  PATH",
+    ]
+    with zipfile.ZipFile(destination, "w", allowZip64=True) as archive:
+        for relative, archive_name in files:
+            source = PROJECT_ROOT / relative
+            data = source.read_bytes()
+            manifest_lines.append(f"{hashlib.sha256(data).hexdigest()}  {archive_name}")
+            archive.writestr(_zip_info(f"{archive_root}/{archive_name}", source), data)
+        info_zip = zipfile.ZipInfo(
+            f"{archive_root}/RELEASE-MANIFEST.txt", date_time=(2020, 1, 1, 0, 0, 0)
+        )
+        info_zip.compress_type = zipfile.ZIP_DEFLATED
+        info_zip.create_system = 3
+        info_zip.external_attr = (stat.S_IFREG | 0o644) << 16
+        archive.writestr(info_zip, ("\n".join(manifest_lines) + "\n").encode("utf-8"))
+    archive_digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+    checksum = destination.with_suffix(destination.suffix + ".sha256")
+    checksum.write_text(f"{archive_digest}  {destination.name}\n", encoding="utf-8")
+    return {
+        "kind": "integrated-skill", "archive": str(destination),
+        "sha256": archive_digest, "checksum_file": str(checksum),
+        "files": len(files) + 1, "size_bytes": destination.stat().st_size,
+    }
+
+
 def assert_versions_current() -> None:
     changed = synchronize(PROJECT_ROOT)
     if changed:
@@ -244,8 +345,16 @@ def assert_versions_current() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--kind", choices=("classroom", "skill", "all"), default="classroom")
     args = parser.parse_args()
-    payload = create_release(args.out)
+    if args.kind == "all":
+        if args.out is not None:
+            parser.error("--out cannot be combined with --kind all")
+        payload: Any = {"releases": [create_release(), create_skill_release()]}
+    elif args.kind == "skill":
+        payload = create_skill_release(args.out)
+    else:
+        payload = create_release(args.out)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 

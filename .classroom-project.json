@@ -1,8 +1,8 @@
 {
   "project_name": "medical-journal-pptx-classroom",
-  "classroom_version": "4.6.0",
-  "skill_name": "medical-journal-to-pptx-classroom",
-  "classroom_skill_version": "v0.2.38-bg-aware-trim",
+  "classroom_version": "4.7.0-rc.1",
+  "skill_name": "medical-journal-to-pptx-integrated",
+  "classroom_skill_version": "v4.7.0-rc.1",
   "python_minimum": "3.11",
   "python_maximum_tested": "3.13",
   "directories": {
@@ -16,5 +16,7 @@
       "maximum_slides": 55,
       "description": "Complete medical-journal teaching workflow with mandatory rendered visual QA"
     }
-  }
+  },
+  "integrated_skill_name": "medical-journal-to-pptx-integrated",
+  "integrated_skill_version": "v4.7.0-rc.1"
 }
